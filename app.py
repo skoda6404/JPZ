@@ -4,6 +4,7 @@ import plotly.express as px
 import os
 import sys
 import re
+import json
 
 # --- CONFIG ---
 # --- CONFIG ---
@@ -102,17 +103,10 @@ def load_school_map():
             name_vessel = str(row['Nazev']).strip()
             full_name = str(row['Plny_nazev']).strip()
             
-            final_name = name_vessel
-            if short_name and short_name.lower() != 'nan' and len(short_name) > 1:
-                if short_name.lower() in ['gymnázium', 'střední škola', 'základní škola', 'střední odborná škola']:
-                    if ',' in full_name:
-                        parts = [p.strip() for p in full_name.split(',')]
-                        final_name = f"{parts[0]}, {parts[1]}" if len(parts) >= 2 else full_name
-                    else:
-                        final_name = full_name
-                else:
-                    final_name = short_name
-            
+            final_name = full_name
+            if not final_name or final_name.lower() == 'nan':
+                 final_name = name_vessel
+
             misto = str(row['Misto']).strip() if 'Misto' in row and pd.notna(row['Misto']) else ""
             if misto and misto.lower() not in final_name.lower():
                 final_name = f"{final_name} ({misto})"
@@ -123,6 +117,14 @@ def load_school_map():
         except:
             continue
     return mapping
+
+@st.cache_data
+def load_kkov_map():
+    """Loads KKOV code to Name mapping from JSON"""
+    if os.path.exists('kkov_map.json'):
+        with open('kkov_map.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
 
 @st.cache_data
 def load_year_data(year):
@@ -219,7 +221,8 @@ filtered_df = raw_df[raw_df['kolo'].isin(selected_rounds)] if selected_rounds el
 
 # --- DATA TRANSFORMATION ---
 @st.cache_data
-def get_long_format(df_in, _school_map):
+@st.cache_data
+def get_long_format(df_in, _school_map, _kkov_map):
     if df_in.empty: return pd.DataFrame()
     normalized_data = []
     
@@ -275,16 +278,23 @@ def get_long_format(df_in, _school_map):
     if not normalized_data: return pd.DataFrame()
     res = pd.concat(normalized_data, ignore_index=True)
     res['SchoolName'] = res['RED_IZO'].map(_school_map).fillna("Neznámá škola (" + res['RED_IZO'].astype(str).str.replace('.0','') + ")")
+    # Map KKOV to Name
+    res['FieldName'] = res['KKOV'].map(_kkov_map).fillna(res['KKOV'])
+    # Combine for display if needed, but keeping separate is better for filtering
+    res['FieldLabel'] = res['FieldName'] + " (" + res['KKOV'] + ")"
+    
     # Clean Reason
     res['Reason'] = res['Reason'].astype(str).str.strip()
     return res
 
-long_df = get_long_format(filtered_df, school_map)
+kkov_map = load_kkov_map()
+long_df = get_long_format(filtered_df, school_map, kkov_map)
 
 # --- SIDEBAR: SELECTION FILTERS ---
 st.sidebar.markdown("---")
 
 if not long_df.empty:
+    # 1. School Filter
     available_schools = sorted(long_df['SchoolName'].unique().tolist())
     if 'selected_schools' not in st.session_state: st.session_state.selected_schools = []
     # Persistence check
@@ -295,7 +305,7 @@ if not long_df.empty:
     
     if selected_schools:
         school_sub = long_df[long_df['SchoolName'].isin(selected_schools)]
-        available_fields = sorted(school_sub['KKOV'].unique().tolist())
+        available_fields = sorted(school_sub['FieldLabel'].unique().tolist())
         if 'selected_fields' not in st.session_state: st.session_state.selected_fields = available_fields
         st.session_state.selected_fields = [f for f in st.session_state.selected_fields if f in available_fields]
         
@@ -315,7 +325,7 @@ if not selected_schools or not selected_fields:
     st.info("Zvolte v bočním panelu školy a obory.")
     st.stop()
 
-display_df = long_df[(long_df['SchoolName'].isin(selected_schools)) & (long_df['KKOV'].isin(selected_fields))]
+display_df = long_df[(long_df['SchoolName'].isin(selected_schools)) & (long_df['FieldLabel'].isin(selected_fields))]
 # In 2024 bool was True/False -> 1/0. In 2025 1/2. 
 # My normalization made it 1 for accepted.
 admitted_only = display_df[display_df['Prijat'] == 1].copy()
@@ -332,7 +342,7 @@ else:
     fig = go.Figure()
     
     # Sort by school/field to maintain consistent colors
-    groups = sorted(admitted_only.groupby(['SchoolName', 'KKOV']), key=lambda x: x[0])
+    groups = sorted(admitted_only.groupby(['SchoolName', 'FieldLabel']), key=lambda x: x[0])
     
     # Define a color palette cycle if needed, or rely on plotly's default
     colors = px.colors.qualitative.Plotly
@@ -388,7 +398,7 @@ else:
 st.markdown("### 📋 Podrobné statistiky")
 
 # Pre-calc colors
-groups = sorted(display_df.groupby(['SchoolName', 'KKOV']), key=lambda x: x[0])
+groups = sorted(display_df.groupby(['SchoolName', 'FieldLabel']), key=lambda x: x[0])
 colors = px.colors.qualitative.Plotly
 color_map = {} # (School, Field) -> Color
 
