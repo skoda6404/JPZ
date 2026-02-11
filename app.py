@@ -27,6 +27,11 @@ if st.session_state.get('pending_back_nav'):
     st.session_state['view_mode'] = "Srovnání škol"
     st.session_state['navigated_from_comparison'] = False
     del st.session_state['pending_back_nav']
+    # Restore saved selections
+    if 'saved_schools_selection' in st.session_state:
+        st.session_state['schools_select_v2'] = st.session_state['saved_schools_selection']
+    if 'saved_fields_selection' in st.session_state:
+        st.session_state['fields_select_v2'] = st.session_state['saved_fields_selection']
 
 def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
     pdf = FPDF()
@@ -818,6 +823,9 @@ if not display_df.empty:
         if view_mode == "Srovnání škol" and selected_row and hasattr(selected_row, "selection") and selected_row.selection.rows:
             idx = selected_row.selection.rows[0]
             school_to_detail = pivot.iloc[idx]['Škola']
+            # Save current selections before navigating away
+            st.session_state['saved_schools_selection'] = st.session_state.get('schools_select_v2', [])
+            st.session_state['saved_fields_selection'] = st.session_state.get('fields_select_v2', [])
             st.session_state['pending_nav_school'] = school_to_detail
             st.rerun()
     else:
