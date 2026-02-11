@@ -623,10 +623,18 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
         
         counts = df_valid['AcceptedDetail'].value_counts().reset_index().head(10)
         counts.columns = ['Cíl (Škola + Obor)', 'Počet']
+        
+        # NEW: Dynamic height based on item count to keep bar thickness consistent
+        # Base height (40) + approx 35px per row
+        calc_height = 100 + (len(counts) * 35)
+        
         fig = px.bar(counts, x='Počet', y='Cíl (Škola + Obor)', orientation='h',
                       title=title, color='Počet', color_continuous_scale=color_scale, 
-                      height=350, range_x=[0, max_x * 1.1] if max_x > 0 else None)
-        fig.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(l=20, r=20, t=40, b=20))
+                      height=calc_height, text='Počet',
+                      range_x=[0, max_x * 1.1] if max_x > 0 else None)
+        
+        fig.update_traces(textposition='outside', cliponaxis=False)
+        fig.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(l=20, r=40, t=40, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
     # Stacked vertically as requested with synced scale
