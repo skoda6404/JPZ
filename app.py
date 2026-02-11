@@ -97,8 +97,11 @@ st.markdown("""
 reason_map = {
     "prijat_na_vyssi_prioritu": "Přijat na vyšší prioritu",
     "neprijat_pro_nedostatecnou_kapacitu": "Kapacita",
+    "pro_nedostacujici_kapacitu": "Kapacita",
     "neprijat_pro_nesplneni_podminek": "Nesplnil podmínky",
+    "pro_nesplneni_podminek": "Nesplnil podmínky",
     "vzdal_se_u_nas": "Vzdal se (u nás)",
+    "vzdal_se": "Vzdal se (u nás)",
     "Neuvedeno": "Neuvedeno"
 }
 
@@ -447,18 +450,22 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     m3.metric("Index přetlaku", f"{competition_index:.2f}x")
     
     # New Advanced KPIs
-    cap_rejects = len(school_data[school_data['Reason'] == 'neprijat_pro_nedostatecnou_kapacitu'])
+    # Robust check for reason - searching for 'kapacit' covers both common variants
+    cap_rejects = len(school_data[school_data['Reason'].str.contains('kapacit', case=False, na=False)])
     cap_reject_rate = (cap_rejects / total_apps * 100) if total_apps > 0 else 0
     
     p1_data = school_data[school_data['Priority'] == 1]
     p1_loyalty = (len(p1_data[p1_data['Prijat'] == 1]) / len(p1_data) * 100) if not p1_data.empty else 0
     
     avg_admitted = school_data[school_data['Prijat'] == 1]['TotalPoints'].mean()
-    lost_talents = school_data[school_data['Reason'] == 'prijat_na_vyssi_prioritu']
+    # Robust check for 'lost' students (higher priority elsewhere)
+    lost_talents = school_data[school_data['Reason'].str.contains('vyssi_priorit|vyssi prioritu', case=False, na=False)]
     avg_lost = lost_talents['TotalPoints'].mean()
     talent_gap = (avg_lost - avg_admitted) if not pd.isna(avg_lost) and not pd.isna(avg_admitted) else 0
 
-    passed_count = len(school_data[school_data['Reason'] != 'neprijat_pro_nesplneni_podminek'])
+    # Passed count: everyone who wasn't rejected for not meeting conditions
+    not_passed = school_data['Reason'].str.contains('nesplneni_podminek', case=False, na=False)
+    passed_count = len(school_data[~not_passed])
     pure_demand_idx = (passed_count / total_admitted) if total_admitted > 0 else 0
 
     m4, m5, m6 = st.columns(3)
@@ -669,7 +676,7 @@ if not display_df.empty:
             hide_index=True,
             column_config=col_cfg,
             on_select="rerun",
-            selection_mode="single_row"
+            selection_mode="single-row"
         )
         
         # Automatic navigation to detail mode
