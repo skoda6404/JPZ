@@ -562,7 +562,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     # 3. Redistribution Row (New)
     st.markdown("#### Kam odešli ti, kteří nebyli přijati k vám?")
     # Filter: Not admitted at our school, but accepted somewhere else
-    not_here = school_data[school_data['Prijat'] == 0]
+    not_here = school_data[school_data['Prijat'] != 1]
     # Correct identification of those who went elsewhere:
     # They must have an AcceptedSchoolName that is not "Nepřijat / neznámá" AND not our school
     went_elsewhere = not_here[(not_here['AcceptedSchoolName'] != "Nepřijat / neznámá") & (not_here['AcceptedSchoolName'] != school_name)]
