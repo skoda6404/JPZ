@@ -621,25 +621,28 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
             st.info(f"Pro kategorii '{title}' nemáme data o přijetí jinam.")
             return
         
-        counts = df_valid['AcceptedDetail'].value_counts().reset_index().head(15) # Increased to 15
-        counts.columns = ['Cíl (Škola + Obor)', 'Počet']
-        
-        # Dynamic height (using original names, no wrap)
-        calc_height = 100 + (len(counts) * 45)
-        
-        fig = px.bar(counts, x='Počet', y='Cíl (Škola + Obor)', orientation='h',
-                      title=title, color='Počet', color_continuous_scale=color_scale, 
-                      height=calc_height, text='Počet',
-                      range_x=[0, max_x * 1.1])
-        
-        fig.update_traces(textposition='outside', cliponaxis=False)
-        fig.update_layout(
-            yaxis={'categoryorder':'total ascending', 'title': None}, 
-            xaxis={'title': 'Počet žáků'},
-            margin=dict(l=400, r=50, t=50, b=50),
-            title_x=0.0
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        try:
+            counts = df_valid['AcceptedDetail'].value_counts().reset_index().head(15)
+            counts.columns = ['Cíl (Škola + Obor)', 'Počet']
+            
+            # Dynamic height with minimum to prevent rendering issues
+            calc_height = max(250, 100 + (len(counts) * 45))
+            
+            fig = px.bar(counts, x='Počet', y='Cíl (Škola + Obor)', orientation='h',
+                          title=title, color='Počet', color_continuous_scale=color_scale, 
+                          height=calc_height, text='Počet',
+                          range_x=[0, max_x * 1.1])
+            
+            fig.update_traces(textposition='outside', cliponaxis=False)
+            fig.update_layout(
+                yaxis={'categoryorder':'total ascending', 'title': None, 'automargin': True}, 
+                xaxis={'title': 'Počet žáků'},
+                margin=dict(l=20, r=50, t=50, b=50),
+                title_x=0.0
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Chyba při vykreslování grafu '{title}': {e}")
 
     # Stacked vertically as requested with synced scale
     plot_redistribution(cat_a, "A) Přijati na vyšší prioritu", "Viridis", global_max)
