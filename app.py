@@ -16,54 +16,44 @@ def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
     pdf = FPDF()
     pdf.add_page()
     # fpdf2 supports some unicode if we use built-in core fonts, but for Czech TTF is best.
-    # We will use "helvetica" and replace special chars if they break, 
-    # but fpdf2 has better internal support than old fpdf.
+    # We will use "helvetica" and clean text
     pdf.set_font("helvetica", "B", 16)
-    pdf.cell(0, 10, f"Detailni report: {school_name}", ln=True, align="C")
+    pdf.cell(0, 10, clean_pdf_text(f"Detailni report: {school_name}"), ln=True, align="C")
     pdf.set_font("helvetica", "", 12)
-    pdf.cell(0, 10, f"Rok: {year} | Kola: {', '.join(map(str, rounds))}", ln=True, align="C")
+    pdf.cell(0, 10, clean_pdf_text(f"Rok: {year} | Kola: {', '.join(map(str, rounds))}"), ln=True, align="C")
     pdf.ln(10)
     
     # KPIs
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 10, "Klicove metriky skoly:", ln=True)
+    pdf.cell(0, 10, clean_pdf_text("Klicove metriky skoly:"), ln=True)
     pdf.set_font("helvetica", "", 11)
-    pdf.cell(60, 8, f"Prihlasek: {kpi_data['total_apps']}")
-    pdf.cell(60, 8, f"Uspesnost: {kpi_data['success_rate']:.1f}%")
-    pdf.cell(60, 8, f"Pretlak: {kpi_data['comp_idx']:.2f}x")
+    pdf.cell(60, 8, clean_pdf_text(f"Prihlasek: {kpi_data['total_apps']}"))
+    pdf.cell(60, 8, clean_pdf_text(f"Uspesnost: {kpi_data['success_rate']:.1f}%"))
+    pdf.cell(60, 8, clean_pdf_text(f"Pretlak: {kpi_data['comp_idx']:.2f}x"))
     pdf.ln(15)
     
     # Table Header
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("helvetica", "B", 9)
-    # Simple labels for PDF to avoid encoding issues with complex headers
     cols = ["Obor", "Prihl.", "Prijat", "Min. body", "Elita (10%)"]
     w = [90, 20, 25, 25, 30]
     for i, col in enumerate(cols):
-        pdf.cell(w[i], 10, col, 1, 0, "C", True)
+        pdf.cell(w[i], 10, clean_pdf_text(col), 1, 0, "C", True)
     pdf.ln()
     
     # Table Data
     pdf.set_font("helvetica", "", 8)
-    # In the pivot, 'PŘIJAT' might be missing if no one was admitted.
-    # We look for rows where we have stats.
-    # The pivot passed here is the one formatted for display.
     for _, row in pivot_df.iterrows():
-        # Truncate field name if too long
-        field = str(row['Obor'])[:55]
+        field = clean_pdf_text(str(row['Obor']))[:55]
         pdf.cell(w[0], 8, field, 1)
         pdf.cell(w[1], 8, str(row['Celkem přihlášek']), 1, 0, "C")
-        
-        adm_val = str(row.get('PŘIJAT', '-'))
-        pdf.cell(w[2], 8, adm_val, 1, 0, "C")
-        
+        adm_val = str(row.get('PŘIJAT', '-')).replace('\n', ' ')
+        pdf.cell(w[2], 8, clean_pdf_text(adm_val), 1, 0, "C")
         min_b = str(row.get('Poslední přijatý (body)', '-'))
         pdf.cell(w[3], 8, min_b, 1, 0, "C")
-        
         elite = str(row.get('Elitní průměr (10%)', '-'))
         pdf.cell(w[4], 8, elite, 1, 0, "C")
         pdf.ln()
-    
     return pdf.output()
 
 
@@ -108,6 +98,24 @@ reason_map = {
 
 def get_reason_label(reason):
     return reason_map.get(reason, reason)
+
+def clean_pdf_text(text):
+    """Simple ASCII transliteration for PDF fonts that don't support Unicode"""
+    if not isinstance(text, str): return str(text)
+    trans = {
+        'á': 'a', 'č': 'c', 'ď': 'd', 'é': 'e', 'ě': 'e', 'í': 'i', 'ň': 'n', 'ó': 'o', 'ř': 'r', 'š': 's', 'ť': 't', 'ú': 'u', 'ů': 'u', 'ý': 'y', 'ž': 'z',
+        'Á': 'A', 'Č': 'C', 'Ď': 'D', 'É': 'E', 'Ě': 'E', 'Í': 'I', 'Ň': 'N', 'Ó': 'O', 'Ř': 'R', 'Š': 'S', 'Ť': 'T', 'Ú': 'U', 'Ů': 'U', 'Ý': 'Y', 'Ž': 'Z'
+    }
+    for k, v in trans.items():
+        text = text.replace(k, v)
+    return text
+
+def get_grade_level(kkov):
+    """Identifies grade based on KKOV code (8-year, 6-year, 4-year)"""
+    k = str(kkov)
+    if k.endswith('/81'): return "5. (8leté)"
+    if k.endswith('/61'): return "7. (6leté)"
+    return "9. (4leté/obory)"
 
 # --- DATA NORMALIZATION HELPERS ---
 def clean_col_name(col):
@@ -346,7 +354,8 @@ def get_long_format(df_in, _school_map, _kkov_map):
     
     if not normalized_data: return pd.DataFrame()
     res = pd.concat(normalized_data, ignore_index=True)
-    res['SchoolName'] = res['RED_IZO'].map(_school_map).fillna("Neznámá škola (" + res['RED_IZO'].astype(str).str.replace('.0','') + ")")
+    res['Grade'] = res['KKOV'].map(get_grade_level)
+    res['SchoolName'] = res['RED_IZO'].map(_school_map).fillna("Neznamá škola (" + res['RED_IZO'].astype(str).str.replace('.0','') + ")")
     # Map KKOV to Name
     res['FieldName'] = res['KKOV'].map(_kkov_map).fillna(res['KKOV'])
     # Combine for display if needed, but keeping separate is better for filtering
@@ -357,9 +366,21 @@ def get_long_format(df_in, _school_map, _kkov_map):
     return res
 
 kkov_map = load_kkov_map()
-long_df = get_long_format(filtered_df, school_map, kkov_map)
+long_df_all = get_long_format(filtered_df, school_map, kkov_map)
 
-# --- SIDEBAR: SELECTION FILTERS ---
+# --- SIDEBAR: GRADE FILTER ---
+st.sidebar.markdown("---")
+available_grades = sorted(long_df_all['Grade'].unique().tolist()) if not long_df_all.empty else []
+if not available_grades:
+    selected_grade = None
+else:
+    selected_grade = st.sidebar.radio("Ročník uchazeče", ["Všechny"] + available_grades, key='grade_filter')
+
+if selected_grade and selected_grade != "Všechny":
+    long_df = long_df_all[long_df_all['Grade'] == selected_grade]
+else:
+    long_df = long_df_all
+
 # --- SIDEBAR: VIEW MODE ---
 st.sidebar.markdown("---")
 view_mode = st.sidebar.radio("Zobrazení", ["Srovnání škol", "Detailní rozbor školy"], key='view_mode_select')
@@ -437,6 +458,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
             df_prio = pd.DataFrame(prio_counts)
             fig_prio = px.bar(df_prio, x="Obor", y="Počet", color="Priorita", 
                               title="Rozdělení priorit přihlášek",
+                              height=400,
                               barmode="stack", color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig_prio, use_container_width=True)
             
@@ -448,7 +470,8 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
         
         if not reason_counts.empty:
             fig_pie = px.pie(reason_counts, values='Počet', names='Důvod', 
-                             hole=0.4, title="Proč nebyli uchazeči přijati?")
+                             hole=0.4, title="Proč nebyli uchazeči přijati?",
+                             height=400)
             st.plotly_chart(fig_pie, use_container_width=True)
         else:
             st.info("Žádná data o nepřijatých.")
@@ -512,11 +535,11 @@ if not display_df.empty:
         for prio in range(1, 6):
             cnt_all = len(group[group['Priority'] == prio])
             pct_all = (cnt_all / total_group * 100) if total_group > 0 else 0
-            dist_all.append(f"{cnt_all} ({round(pct_all)}%)")
+            dist_all.append(f"{cnt_all}\n({round(pct_all)}%)")
             cnt_adm = len(group[(group['Prijat'] == 1) & (group['Priority'] == prio)])
             pct_adm = (cnt_adm / total_adm * 100) if total_adm > 0 else 0
-            dist_adm.append(f"{cnt_adm} ({round(pct_adm)}%)")
-        priority_dist_all_str = " + ".join(dist_all); priority_dist_admitted_str = " + ".join(dist_adm)
+            dist_adm.append(f"{cnt_adm}\n({round(pct_adm)}%)")
+        priority_dist_all_str = " | ".join(dist_all); priority_dist_admitted_str = " | ".join(dist_adm)
         
         # Calculate Elite Average (Top 10% of applicants in the field)
         top_10_count = max(1, round(len(group) * 0.1))
