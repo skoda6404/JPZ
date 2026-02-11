@@ -382,9 +382,15 @@ def get_long_format(df_in, _school_map, _kkov_map):
     res = pd.concat(normalized_data, ignore_index=True)
     
     # 2. POST-PROCESSING: Cross-reference across all priorities for EACH student
-    # Find rows where Prijat == 1 and map their SchoolName back to all rows of same student
-    success_map = res[res['Prijat'] == 1].set_index('Student_UUID')['SchoolName'].to_dict()
-    res['AcceptedSchoolName'] = res['Student_UUID'].map(success_map).fillna("Nepřijat / neznámá")
+    # Find rows where Prijat == 1 and map their info back to all rows of same student
+    admitted_rows = res[res['Prijat'] == 1].copy()
+    admitted_rows['CombinedLabel'] = admitted_rows['SchoolName'] + " (" + admitted_rows['FieldLabel'] + ")"
+    
+    success_map_school = admitted_rows.set_index('Student_UUID')['SchoolName'].to_dict()
+    success_map_detail = admitted_rows.set_index('Student_UUID')['CombinedLabel'].to_dict()
+    
+    res['AcceptedSchoolName'] = res['Student_UUID'].map(success_map_school).fillna("Nepřijat / neznámá")
+    res['AcceptedDetail'] = res['Student_UUID'].map(success_map_detail).fillna("Nepřijat / neznámá")
     
     return res
 
@@ -462,6 +468,36 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     
     school_data = long_df[long_df['SchoolName'] == school_name]
     
+    # --- NEW: Points Comparison Chart at the top ---
+    st.markdown("#### 📊 Rozložení bodů přijatých uchazečů (Srovnání s konkurencí)")
+    admitted_only_all = long_df[long_df['Prijat'] == 1].copy()
+    if not admitted_only_all.empty:
+        import plotly.graph_objects as go
+        fig_pts = go.Figure()
+        
+        # We want to show our school's fields and possibly others if they were in comparison?
+        # User asked to "insert graph from comparison". Let's show all fields for CURRENT school
+        # but in the same style as comparison.
+        
+        groups_pts = sorted(school_data[school_data['Prijat'] == 1].groupby(['FieldLabel']), key=lambda x: x[0])
+        colors_pts = px.colors.qualitative.Plotly
+        
+        for i, (field, group) in enumerate(groups_pts):
+            color = colors_pts[i % len(colors_pts)]
+            label = f"{field}"
+            group_s = group.sort_values('TotalPoints', ascending=False).reset_index(drop=True)
+            group_s['Rank'] = group_s.index + 1
+            regular = group_s[~group_s['IsExempt']]; exempt = group_s[group_s['IsExempt']]
+            if not regular.empty:
+                fig_pts.add_trace(go.Scatter(x=regular['Rank'], y=regular['TotalPoints'], mode='lines+markers', name=label, line=dict(color=color), marker=dict(color=color)))
+            if not exempt.empty:
+                fig_pts.add_trace(go.Scatter(x=exempt['Rank'], y=exempt['TotalPoints'], mode='markers', name=f"{label} (Odp. CJL)", marker=dict(color=color, symbol='x-thin', size=10), showlegend=False))
+        
+        fig_pts.update_layout(xaxis_title="Pořadí", yaxis_title="Body", template="plotly_white", height=400, margin=dict(l=40, r=40, t=20, b=40), legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="left", x=0))
+        st.plotly_chart(fig_pts, use_container_width=True)
+    
+    st.markdown("---")
+    
     # 1. KPI Cards
     total_apps = len(school_data)
     total_admitted = len(school_data[school_data['Prijat'] == 1])
@@ -502,10 +538,10 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     st.markdown("---")
     
     # 2. Charts Row
-    c1, c2 = st.columns([2, 1])
+    c1, c2 = st.columns(2)
     
     with c1:
-        st.markdown("#### Distribuce priorit (Zájem o obory)")
+        st.markdown("#### 📝 Priority přihlášek (%)")
         prio_counts = []
         for f in sorted(school_data['FieldLabel'].unique()):
             f_data = school_data[school_data['FieldLabel'] == f]
@@ -515,69 +551,87 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
         
         if prio_counts:
             df_prio = pd.DataFrame(prio_counts)
-            # Add totals for percentages in labels
             total_per_obor = df_prio.groupby('Obor')['Počet'].transform('sum')
             df_prio['Procento'] = (df_prio['Počet'] / total_per_obor * 100).round(0)
             
-            fig_prio = px.bar(df_prio, x="Obor", y="Počet", color="Priorita", 
-                              title="Rozdělení priorit přihlášek",
-                              height=400, text="Počet",
-                              custom_data=["Procento"],
+            fig_prio = px.bar(df_prio, x="Obor", y="Procento", color="Priorita", 
+                              height=400, text="Procento",
                               barmode="stack", color_discrete_sequence=px.colors.qualitative.Pastel)
-            
-            fig_prio.update_traces(
-                texttemplate='%{y}<br>(%{customdata[0]:.0f}%)', 
-                textposition='inside',
-                insidetextanchor='middle'
-            )
+            fig_prio.update_traces(texttemplate='%{text}%', textposition='inside')
+            fig_prio.update_layout(yaxis_title="Procento (%)", showlegend=False)
             st.plotly_chart(fig_prio, use_container_width=True)
-            
-            # Talent Comparison Chart (Tiny horizontal bar)
-            if not pd.isna(avg_admitted) and not pd.isna(avg_lost):
-                talent_df = pd.DataFrame([
-                    {"Skupina": "Naši přijatí", "Body": avg_admitted, "Barva": "green"},
-                    {"Skupina": "Utekli (vyšší priorita)", "Body": avg_lost, "Barva": "red"}
-                ])
-                fig_talent = px.bar(talent_df, x="Body", y="Skupina", orientation='h',
-                                    title="Srovnání průměrných bodů",
-                                    height=200, text=talent_df["Body"].apply(lambda x: f"{x:.1f} b."),
-                                    color="Skupina", color_discrete_map={"Naši přijatí": "#2ecc71", "Utekli (vyšší priorita)": "#e74c3c"})
-                fig_talent.update_layout(showlegend=False, xaxis_title=None, yaxis_title=None, margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig_talent, use_container_width=True)
 
     with c2:
-        st.markdown("#### Důvody nepřijetí")
-        reason_counts = school_data[school_data['Prijat'] != 1]['Reason'].value_counts().reset_index()
-        reason_counts.columns = ['Důvod', 'Počet']
-        reason_counts['Důvod'] = reason_counts['Důvod'].map(lambda x: reason_map.get(x, x))
+        st.markdown("#### ✅ Priority PŘIJATÝCH (%)")
+        adm_data = school_data[school_data['Prijat'] == 1]
+        prio_adm_counts = []
+        for f in sorted(adm_data['FieldLabel'].unique()):
+            f_data = adm_data[adm_data['FieldLabel'] == f]
+            for p in range(1, 6):
+                cnt = len(f_data[f_data['Priority'] == p])
+                prio_adm_counts.append({"Obor": f, "Priorita": f"{p}. priorita", "Počet": cnt})
         
-        if not reason_counts.empty:
-            fig_pie = px.pie(reason_counts, values='Počet', names='Důvod', 
-                             hole=0.4, title="Proč nebyli uchazeči přijati?",
-                             height=400)
-            st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("Žádná data o nepřijatých.")
+        if prio_adm_counts:
+            df_prio_adm = pd.DataFrame(prio_adm_counts)
+            total_per_obor_adm = df_prio_adm.groupby('Obor')['Počet'].transform('sum')
+            df_prio_adm['Procento'] = (df_prio_adm['Počet'] / total_per_obor_adm * 100).round(0)
+            
+            fig_prio_adm = px.bar(df_prio_adm, x="Obor", y="Procento", color="Priorita", 
+                                  height=400, text="Procento",
+                                  barmode="stack", color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_prio_adm.update_traces(texttemplate='%{text}%', textposition='inside')
+            fig_prio_adm.update_layout(yaxis_title="Procento (%)")
+            st.plotly_chart(fig_prio_adm, use_container_width=True)
 
-    # 3. Redistribution Row (New)
-    st.markdown("#### Kam odešli ti, kteří nebyli přijati k vám?")
-    # Filter: Not admitted at our school, but accepted somewhere else
-    not_here = school_data[school_data['Prijat'] != 1]
-    # Correct identification of those who went elsewhere:
-    # They must have an AcceptedSchoolName that is not "Nepřijat / neznámá" AND not our school
-    went_elsewhere = not_here[(not_here['AcceptedSchoolName'] != "Nepřijat / neznámá") & (not_here['AcceptedSchoolName'] != school_name)]
+    st.markdown("---")
     
-    if not went_elsewhere.empty:
-        dest_counts = went_elsewhere['AcceptedSchoolName'].value_counts().reset_index().head(10)
-        dest_counts.columns = ['Cílová škola', 'Počet uchazečů']
-        fig_dest = px.bar(dest_counts, x='Počet uchazečů', y='Cílová škola', orientation='h',
-                          title="Top 10 škol, kam odešli vaši uchazeči",
-                          color='Počet uchazečů', color_continuous_scale='Viridis',
-                          height=400)
-        fig_dest.update_layout(yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_dest, use_container_width=True)
-    else:
-        st.info("O těchto uchazečích nemáme informace o přijetí na jinou školu (pravděpodobně nebyli přijati nikam v daném kole).")
+    # Redistribution Charts
+    st.markdown("### 🔄 Analýza přelivu (Kam odešli ti, co k vám nenastoupili?)")
+    not_here = school_data[school_data['Prijat'] != 1]
+    
+    # Robust categorization
+    # A) Higher priority
+    cat_a = not_here[not_here['Reason'].str.contains('vyssi_priorit|vyssi prioritu', case=False, na=False)]
+    # B) Capacity
+    cat_b = not_here[not_here['Reason'].str.contains('kapacit', case=False, na=False)]
+    # C) Failed exam
+    cat_c = not_here[not_here['Reason'].str.contains('nesplneni_podminek|neprospe|nesplnil', case=False, na=False)]
+    
+    def plot_redistribution(df_red, title, color_scale):
+        # Filter only those with known destination
+        df_valid = df_red[df_red['AcceptedDetail'] != "Nepřijat / neznámá"]
+        if df_valid.empty:
+            st.info(f"Pro kategorii '{title}' nemáme data o přijetí jinam.")
+            return
+        
+        counts = df_valid['AcceptedDetail'].value_counts().reset_index().head(10)
+        counts.columns = ['Cíl (Škola + Obor)', 'Počet']
+        fig = px.bar(counts, x='Počet', y='Cíl (Škola + Obor)', orientation='h',
+                      title=title, color='Počet', color_continuous_scale=color_scale, height=350)
+        fig.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(l=20, r=20, t=40, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        plot_redistribution(cat_a, "A) Přijati na vyšší prioritu", "Viridis")
+    with col2:
+        plot_redistribution(cat_b, "B) Nepřijati z kapacitních důvodů", "Plasma")
+    
+    plot_redistribution(cat_c, "C) Nepřijati pro nesplnění podmínek (neprospěli)", "Magma")
+
+    # Talent Comparison Chart (Tiny horizontal bar)
+    if not pd.isna(avg_admitted) and not pd.isna(avg_lost):
+        st.markdown("---")
+        talent_df = pd.DataFrame([
+            {"Skupina": "Naši přijatí", "Body": avg_admitted, "Barva": "green"},
+            {"Skupina": "Utekli (vyšší priorita)", "Body": avg_lost, "Barva": "red"}
+        ])
+        fig_talent = px.bar(talent_df, x="Body", y="Skupina", orientation='h',
+                            title="Srovnání kvality: Naši přijatí vs. Ztracení (vyšší priorita)",
+                            height=200, text=talent_df["Body"].apply(lambda x: f"{x:.1f} b."),
+                            color="Skupina", color_discrete_map={"Naši přijatí": "#2ecc71", "Utekli (vyšší priorita)": "#e74c3c"})
+        fig_talent.update_layout(showlegend=False, xaxis_title=None, yaxis_title=None, margin=dict(l=20, r=20, t=40, b=20))
+        st.plotly_chart(fig_talent, use_container_width=True)
 
     # 3. Detailed Stats Table
     # (The shared table logic below will use this display_df)
