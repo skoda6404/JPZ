@@ -599,7 +599,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
 
     st.markdown("---")
     
-    # Redistribution Charts - Now stacked vertically
+    # Redistribution Charts - Now stacked vertically with synced scale
     st.markdown("### 🔄 Analýza přelivu (Kam odešli ti, co k vám nenastoupili?)")
     not_here = school_data[school_data['Prijat'] != 1]
     
@@ -608,7 +608,14 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     cat_b = not_here[not_here['Reason'].str.contains('kapacit', case=False, na=False)]
     cat_c = not_here[not_here['Reason'].str.contains('nesplneni_podminek|neprospe|nesplnil', case=False, na=False)]
     
-    def plot_redistribution(df_red, title, color_scale):
+    # NEW: Find global max across all categories for synced scale
+    def get_max_count(df_red):
+        df_v = df_red[df_red['AcceptedDetail'] != "Nepřijat / neznámá"]
+        return df_v['AcceptedDetail'].value_counts().max() if not df_v.empty else 0
+    
+    global_max = max(get_max_count(cat_a), get_max_count(cat_b), get_max_count(cat_c))
+    
+    def plot_redistribution(df_red, title, color_scale, max_x):
         df_valid = df_red[df_red['AcceptedDetail'] != "Nepřijat / neznámá"]
         if df_valid.empty:
             st.info(f"Pro kategorii '{title}' nemáme data o přijetí jinam.")
@@ -617,14 +624,15 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
         counts = df_valid['AcceptedDetail'].value_counts().reset_index().head(10)
         counts.columns = ['Cíl (Škola + Obor)', 'Počet']
         fig = px.bar(counts, x='Počet', y='Cíl (Škola + Obor)', orientation='h',
-                      title=title, color='Počet', color_continuous_scale=color_scale, height=350)
+                      title=title, color='Počet', color_continuous_scale=color_scale, 
+                      height=350, range_x=[0, max_x * 1.1] if max_x > 0 else None)
         fig.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
-    # Stacked vertically as requested
-    plot_redistribution(cat_a, "A) Přijati na vyšší prioritu", "Viridis")
-    plot_redistribution(cat_b, "B) Nepřijati z kapacitních důvodů", "Plasma")
-    plot_redistribution(cat_c, "C) Nepřijati pro nesplnění podmínek (neprospěli)", "Magma")
+    # Stacked vertically as requested with synced scale
+    plot_redistribution(cat_a, "A) Přijati na vyšší prioritu", "Viridis", global_max)
+    plot_redistribution(cat_b, "B) Nepřijati z kapacitních důvodů", "Plasma", global_max)
+    plot_redistribution(cat_c, "C) Nepřijati pro nesplnění podmínek (neprospěli)", "Magma", global_max)
 
     # Talent Comparison Chart (Tiny horizontal bar)
     if not pd.isna(avg_admitted) and not pd.isna(avg_lost):
