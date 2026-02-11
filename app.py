@@ -315,9 +315,20 @@ filtered_df = raw_df[raw_df['kolo'].isin(selected_rounds)] if selected_rounds el
 
 # --- DATA TRANSFORMATION ---
 @st.cache_data
-@st.cache_data
 def get_long_format(df_in, _school_map, _kkov_map):
     if df_in.empty: return pd.DataFrame()
+    
+    # Pre-calculate where each student was accepted (wide format)
+    df_in = df_in.copy()
+    df_in['AcceptedRED_IZO'] = None
+    for j in range(1, 6):
+        r_col, p_col = f'ss{j}_redizo', f'ss{j}_prijat'
+        if r_col in df_in.columns and p_col in df_in.columns:
+            mask = (df_in['AcceptedRED_IZO'].isna()) & (df_in[p_col] == 1)
+            df_in.loc[mask, 'AcceptedRED_IZO'] = df_in.loc[mask, r_col]
+            
+    df_in['AcceptedSchoolName'] = df_in['AcceptedRED_IZO'].map(_school_map).fillna("Nepřijat / neznámá")
+
     normalized_data = []
     
     cjl_col = 'c_procentni_skor' if 'c_procentni_skor' in df_in.columns else None
@@ -328,7 +339,7 @@ def get_long_format(df_in, _school_map, _kkov_map):
         d_col = f'ss{i}_duvod_neprijeti'
         
         if r_col in df_in.columns and k_col in df_in.columns:
-            subset = df_in[[r_col, k_col, p_col, 'kolo']].copy()
+            subset = df_in[[r_col, k_col, p_col, 'kolo', 'AcceptedSchoolName']].copy()
             subset.rename(columns={r_col: 'RED_IZO', k_col: 'KKOV', p_col: 'Prijat'}, inplace=True)
             subset['Priority'] = i
             
@@ -529,7 +540,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
                                     color="Skupina", color_discrete_map={"Naši přijatí": "#2ecc71", "Utekli (vyšší priorita)": "#e74c3c"})
                 fig_talent.update_layout(showlegend=False, xaxis_title=None, yaxis_title=None, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig_talent, use_container_width=True)
-            
+
     with c2:
         st.markdown("#### Důvody nepřijetí")
         reason_counts = school_data[school_data['Prijat'] != 1]['Reason'].value_counts().reset_index()
@@ -543,6 +554,26 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
             st.plotly_chart(fig_pie, use_container_width=True)
         else:
             st.info("Žádná data o nepřijatých.")
+
+    # 3. Redistribution Row (New)
+    st.markdown("#### Kam odešli ti, kteří nebyli přijati k vám?")
+    # Filter: Not admitted at our school, but accepted somewhere else
+    not_here = school_data[school_data['Prijat'] == 0]
+    # Correct identification of those who went elsewhere:
+    # They must have an AcceptedSchoolName that is not "Nepřijat / neznámá" AND not our school
+    went_elsewhere = not_here[(not_here['AcceptedSchoolName'] != "Nepřijat / neznámá") & (not_here['AcceptedSchoolName'] != school_name)]
+    
+    if not went_elsewhere.empty:
+        dest_counts = went_elsewhere['AcceptedSchoolName'].value_counts().reset_index().head(10)
+        dest_counts.columns = ['Cílová škola', 'Počet uchazečů']
+        fig_dest = px.bar(dest_counts, x='Počet uchazečů', y='Cílová škola', orientation='h',
+                          title="Top 10 škol, kam odešli vaši uchazeči",
+                          color='Počet uchazečů', color_continuous_scale='Viridis',
+                          height=400)
+        fig_dest.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_dest, use_container_width=True)
+    else:
+        st.info("O těchto uchazečích nemáme informace o přijetí na jinou školu (pravděpodobně nebyli přijati nikam v daném kole).")
 
     # 3. Detailed Stats Table
     # (The shared table logic below will use this display_df)
