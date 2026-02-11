@@ -54,7 +54,7 @@ def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
         elite = str(row.get('Elitní průměr (10%)', '-'))
         pdf.cell(w[4], 8, elite, 1, 0, "C")
         pdf.ln()
-    return pdf.output()
+    return bytes(pdf.output())
 
 
 # Custom CSS for a professional, "Excel-inspired" compact look
@@ -65,9 +65,6 @@ st.markdown("""
         padding-bottom: 0.5rem;
         padding-left: 1.5rem;
         padding-right: 1.5rem;
-    }
-    .stPlotlyChart {
-        height: 700px !important;
     }
     div[data-testid="stMetric"] {
         background-color: #f8f9fa;
