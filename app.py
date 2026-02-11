@@ -16,6 +16,7 @@ st.set_page_config(page_title="JPZ", layout="wide")
 if 'pending_nav_school' in st.session_state:
     st.session_state['view_mode_select'] = "Detailní rozbor školy"
     st.session_state['single_school_select'] = st.session_state.pop('pending_nav_school')
+    st.session_state['navigated_from_comparison'] = True
 
 def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
     pdf = FPDF()
@@ -454,6 +455,14 @@ else:
 # --- MAIN PAGE CONTENT ---
 if view_mode == "Detailní rozbor školy" and selected_schools:
     school_name = selected_schools[0]
+    
+    # Back button if navigated from comparison
+    if st.session_state.get('navigated_from_comparison'):
+        if st.button("⬅️ Zpět na srovnání", use_container_width=False):
+            st.session_state['view_mode_select'] = "Srovnání škol"
+            st.session_state['navigated_from_comparison'] = False
+            st.rerun()
+
     st.title(f"🏛️ Detail školy: {school_name}")
     
     school_data = long_df[long_df['SchoolName'] == school_name]
