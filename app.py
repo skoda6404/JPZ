@@ -46,12 +46,12 @@ def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
     for _, row in pivot_df.iterrows():
         field = clean_pdf_text(str(row['Obor']))[:55]
         pdf.cell(w[0], 8, field, 1)
-        pdf.cell(w[1], 8, str(row['Celkem přihlášek']), 1, 0, "C")
+        pdf.cell(w[1], 8, str(row.get('Přihlášek', row.get('Celkem přihlášek', '-'))), 1, 0, "C")
         adm_val = str(row.get('PŘIJAT', '-')).replace('\n', ' ')
         pdf.cell(w[2], 8, clean_pdf_text(adm_val), 1, 0, "C")
-        min_b = str(row.get('Poslední přijatý (body)', '-'))
+        min_b = str(row.get('Poslední\npřijatý', row.get('Poslední přijatý (body)', '-')))
         pdf.cell(w[3], 8, min_b, 1, 0, "C")
-        elite = str(row.get('Elitní průměr (10%)', '-'))
+        elite = str(row.get('Elitní\nprůměr', row.get('Elitní průměr (10%)', '-')))
         pdf.cell(w[4], 8, elite, 1, 0, "C")
         pdf.ln()
     return bytes(pdf.output())
@@ -81,6 +81,15 @@ st.markdown("""
     /* Compact headers */
     h1 { margin-bottom: 0.5rem !important; font-size: 1.8rem !important; }
     h3 { margin-top: 1rem !important; margin-bottom: 0.5rem !important; font-size: 1.2rem !important; }
+    
+    /* Force wrapping in dataframes and headers */
+    div[data-testid="stDataFrame"] thead th {
+        white-space: pre-wrap !important;
+        vertical-align: bottom !important;
+    }
+    div[data-testid="stDataFrame"] td {
+        white-space: pre-wrap !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
