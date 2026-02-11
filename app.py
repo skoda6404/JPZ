@@ -369,7 +369,7 @@ def get_long_format(df_in, _school_map, _kkov_map):
             mat_num = pd.to_numeric(mat_raw, errors='coerce')
             
             subset['IsExempt'] = cjl_num.isna() & mat_num.notna()
-            subset['TotalPoints'] = (cjl_num.fillna(0) * 0.5) + (mat_num.fillna(0) * 0.5)
+            subset['TotalPoints'] = ((cjl_num.fillna(0) * 0.5) + (mat_num.fillna(0) * 0.5)).clip(0, 100)
             
             # Map KKOV to Name
             subset['Grade'] = subset['KKOV'].map(get_grade_level)
@@ -469,7 +469,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     school_data = long_df[long_df['SchoolName'] == school_name]
     
     # --- NEW: Points Comparison Chart at the top ---
-    st.markdown("#### 📊 Rozložení bodů přijatých uchazečů (Srovnání s konkurencí)")
+    st.markdown("#### 📊 Rozložení bodů přijatých uchazečů")
     admitted_only_all = long_df[long_df['Prijat'] == 1].copy()
     if not admitted_only_all.empty:
         import plotly.graph_objects as go
@@ -585,20 +585,30 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
 
     st.markdown("---")
     
-    # Redistribution Charts
+    # 3. Reasons Row (Restored)
+    st.markdown("#### 🤔 Proč nebyli uchazeči přijati?")
+    reason_counts = school_data[school_data['Prijat'] != 1]['Reason'].value_counts().reset_index()
+    reason_counts.columns = ['Důvod', 'Počet']
+    reason_counts['Důvod Label'] = reason_counts['Důvod'].map(lambda x: reason_map.get(x, x))
+    
+    if not reason_counts.empty:
+        fig_pie = px.pie(reason_counts, values='Počet', names='Důvod Label', 
+                         hole=0.4, height=350)
+        fig_pie.update_layout(margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=-0.2))
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    st.markdown("---")
+    
+    # Redistribution Charts - Now stacked vertically
     st.markdown("### 🔄 Analýza přelivu (Kam odešli ti, co k vám nenastoupili?)")
     not_here = school_data[school_data['Prijat'] != 1]
     
     # Robust categorization
-    # A) Higher priority
     cat_a = not_here[not_here['Reason'].str.contains('vyssi_priorit|vyssi prioritu', case=False, na=False)]
-    # B) Capacity
     cat_b = not_here[not_here['Reason'].str.contains('kapacit', case=False, na=False)]
-    # C) Failed exam
     cat_c = not_here[not_here['Reason'].str.contains('nesplneni_podminek|neprospe|nesplnil', case=False, na=False)]
     
     def plot_redistribution(df_red, title, color_scale):
-        # Filter only those with known destination
         df_valid = df_red[df_red['AcceptedDetail'] != "Nepřijat / neznámá"]
         if df_valid.empty:
             st.info(f"Pro kategorii '{title}' nemáme data o přijetí jinam.")
@@ -611,12 +621,9 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
         fig.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        plot_redistribution(cat_a, "A) Přijati na vyšší prioritu", "Viridis")
-    with col2:
-        plot_redistribution(cat_b, "B) Nepřijati z kapacitních důvodů", "Plasma")
-    
+    # Stacked vertically as requested
+    plot_redistribution(cat_a, "A) Přijati na vyšší prioritu", "Viridis")
+    plot_redistribution(cat_b, "B) Nepřijati z kapacitních důvodů", "Plasma")
     plot_redistribution(cat_c, "C) Nepřijati pro nesplnění podmínek (neprospěli)", "Magma")
 
     # Talent Comparison Chart (Tiny horizontal bar)
