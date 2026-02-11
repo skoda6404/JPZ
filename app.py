@@ -97,6 +97,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# --- GLOBAL CONSTANTS ---
+reason_map = {
+    "prijat_na_vyssi_prioritu": "Přijat na vyšší prioritu",
+    "neprijat_pro_nedostatecnou_kapacitu": "Kapacita",
+    "neprijat_pro_nesplneni_podminek": "Nesplnil podmínky",
+    "vzdal_se_u_nas": "Vzdal se (u nás)",
+    "Neuvedeno": "Neuvedeno"
+}
+
+def get_reason_label(reason):
+    return reason_map.get(reason, reason)
+
 # --- DATA NORMALIZATION HELPERS ---
 def clean_col_name(col):
     """Strip non-ascii characters and normalize case"""
@@ -374,7 +386,7 @@ if not long_df.empty:
     else:
         # Detail Mode: Select single school
         available_schools = sorted(long_df['SchoolName'].unique().tolist())
-        selected_school = st.sidebar.selectbox("Vyberte školu pro detail", options=available_schools, key='single_school_select')
+        selected_school = st.sidebar.selectbox("Vyberte školu pro detail", options=available_schools, index=None, key='single_school_select', placeholder="Zvolte školu...")
         selected_schools = [selected_school] if selected_school else []
         
         # In detail mode, we usually show all fields for that school
