@@ -18,6 +18,11 @@ if 'pending_nav_school' in st.session_state:
     st.session_state['single_school_select'] = st.session_state.pop('pending_nav_school')
     st.session_state['navigated_from_comparison'] = True
 
+if st.session_state.get('pending_back_nav'):
+    st.session_state['view_mode_select'] = "Srovnání škol"
+    st.session_state['navigated_from_comparison'] = False
+    del st.session_state['pending_back_nav']
+
 def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
     pdf = FPDF()
     pdf.add_page()
@@ -325,10 +330,22 @@ def get_long_format(df_in, _school_map, _kkov_map):
     for j in range(1, 6):
         r_col, p_col = f'ss{j}_redizo', f'ss{j}_prijat'
         if r_col in df_in.columns and p_col in df_in.columns:
-            mask = (df_in['AcceptedRED_IZO'].isna()) & (df_in[p_col] == 1)
+            # Cast to numeric to handle cases where it might be string or float
+            p_val = pd.to_numeric(df_in[p_col], errors='coerce')
+            mask = (df_in['AcceptedRED_IZO'].isna()) & (p_val == 1)
+            # Ensure REDIZO is matched as normalized string/int
             df_in.loc[mask, 'AcceptedRED_IZO'] = df_in.loc[mask, r_col]
-            
-    df_in['AcceptedSchoolName'] = df_in['AcceptedRED_IZO'].map(_school_map).fillna("Nepřijat / neznámá")
+    
+    # Normalize RED_IZO for mapping (ensure it's INT matching the map keys)
+    def normalize_redizo(val):
+        if pd.isna(val): return None
+        try:
+            return int(float(val))
+        except:
+            return val
+
+    df_in['AcceptedRED_IZO_norm'] = df_in['AcceptedRED_IZO'].apply(normalize_redizo)
+    df_in['AcceptedSchoolName'] = df_in['AcceptedRED_IZO_norm'].map(_school_map).fillna("Nepřijat / neznámá")
 
     normalized_data = []
     
@@ -456,11 +473,10 @@ else:
 if view_mode == "Detailní rozbor školy" and selected_schools:
     school_name = selected_schools[0]
     
-    # Back button if navigated from comparison
+    # Back button - strictly only if navigated from comparison
     if st.session_state.get('navigated_from_comparison'):
-        if st.button("⬅️ Zpět na srovnání", use_container_width=False):
-            st.session_state['view_mode_select'] = "Srovnání škol"
-            st.session_state['navigated_from_comparison'] = False
+        if st.button("⬅️ Zpět na srovnání", use_container_width=True):
+            st.session_state['pending_back_nav'] = True
             st.rerun()
 
     st.title(f"🏛️ Detail školy: {school_name}")
