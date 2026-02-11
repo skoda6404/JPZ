@@ -606,14 +606,14 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     # Robust categorization
     cat_a = not_here[not_here['Reason'].str.contains('vyssi_priorit|vyssi prioritu', case=False, na=False)]
     cat_b = not_here[not_here['Reason'].str.contains('kapacit', case=False, na=False)]
-    cat_c = not_here[not_here['Reason'].str.contains('nesplneni_podminek|neprospe|nesplnil', case=False, na=False)]
+    cat_c = not_here[not_here['Reason'].str.contains('nespln|neprosp|nesplnil|nedosah|kriteri', case=False, na=False)]
     
     # NEW: Find global max across all categories for synced scale
     def get_max_count(df_red):
         df_v = df_red[df_red['AcceptedDetail'] != "Nepřijat / neznámá"]
         return df_v['AcceptedDetail'].value_counts().max() if not df_v.empty else 0
     
-    global_max = max(get_max_count(cat_a), get_max_count(cat_b), get_max_count(cat_c))
+    global_max = max(get_max_count(cat_a), get_max_count(cat_b), get_max_count(cat_c), 1) # Min 1 to avoid range [0,0]
     
     def plot_redistribution(df_red, title, color_scale, max_x):
         df_valid = df_red[df_red['AcceptedDetail'] != "Nepřijat / neznámá"]
@@ -621,22 +621,22 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
             st.info(f"Pro kategorii '{title}' nemáme data o přijetí jinam.")
             return
         
-        counts = df_valid['AcceptedDetail'].value_counts().reset_index().head(10)
+        counts = df_valid['AcceptedDetail'].value_counts().reset_index().head(15) # Increased to 15
         counts.columns = ['Cíl (Škola + Obor)', 'Počet']
         
         # Dynamic height (using original names, no wrap)
-        calc_height = 100 + (len(counts) * 40)
+        calc_height = 100 + (len(counts) * 45)
         
         fig = px.bar(counts, x='Počet', y='Cíl (Škola + Obor)', orientation='h',
                       title=title, color='Počet', color_continuous_scale=color_scale, 
                       height=calc_height, text='Počet',
-                      range_x=[0, max_x * 1.1] if max_x > 0 else None)
+                      range_x=[0, max_x * 1.1])
         
         fig.update_traces(textposition='outside', cliponaxis=False)
         fig.update_layout(
             yaxis={'categoryorder':'total ascending', 'title': None}, 
             xaxis={'title': 'Počet žáků'},
-            margin=dict(l=400, r=50, t=50, b=50), # Larger left margin to accommodate single-line long names
+            margin=dict(l=400, r=50, t=50, b=50),
             title_x=0.0
         )
         st.plotly_chart(fig, use_container_width=True)
