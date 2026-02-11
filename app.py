@@ -474,12 +474,8 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
             st.info("Žádná data o nepřijatých.")
 
     # 3. Detailed Stats Table
-    st.markdown("#### 📋 Podrobné statistiky oborů")
-    # (Reuse the same table generation logic but filtered for this school)
-    # We already have display_df pre-filtered by selected_schools/selected_fields
+    # (The shared table logic below will use this display_df)
     display_df = long_df[(long_df['SchoolName'] == school_name)]
-    
-    # ... (Rest of the table logic follows) ...
 else:
     # --- COMPARISON MODE (Original logic) ---
     st.title(f"📈 JPZ {selected_year}")
@@ -518,7 +514,10 @@ if view_mode == "Srovnání škol":
 
 # Shared Statistics Table
 if not display_df.empty:
-    st.markdown("### 📋 Statistický přehled")
+    if view_mode == "Srovnání škol":
+        st.markdown("### 📋 Statistický přehled (srovnání)")
+    else:
+        st.markdown("#### 📋 Podrobné statistiky oboru")
     groups = sorted(display_df.groupby(['SchoolName', 'FieldLabel']), key=lambda x: x[0])
     colors = px.colors.qualitative.Plotly
     color_map = {}
@@ -555,8 +554,9 @@ if not display_df.empty:
             stats_base.append({
                 "SchoolName": school, "KKOV": field, "TotalCount": len(group),
                 "PriorityDistAll": priority_dist_all_str, "PriorityDistAdm": priority_dist_admitted_str,
-                "EliteAvg": elite_avg,
-                "MinScore": min_score_val, "Reason": reason, "Počet": cnt_regular,
+                "EliteAvg": round(elite_avg, 1) if elite_avg else None,
+                "MinScore": round(min_score_val, 1) if min_score_val else None, 
+                "Reason": reason, "Počet": cnt_regular,
                 "Průměr": avg_points_reg, "Cizinci": cnt_exempt
             })
 
@@ -591,7 +591,20 @@ if not display_df.empty:
                 pdf_bytes = create_pdf_report(school_name, selected_year, selected_rounds, pivot, kpi_data)
                 st.download_button(label="📄 Stáhnout PDF Report", data=pdf_bytes, file_name=f'report_{school_name.replace(" ", "_")}.pdf', mime='application/pdf', use_container_width=True)
 
-        st.dataframe(pivot.style.apply(lambda row: [f'color: {color_map.get((row["Škola"], row["Obor"]), "#000000")}; font-weight: bold;' for _ in row.index], axis=1), use_container_width=True, hide_index=True)
+        # Style columns for wrapping and alignment
+        col_cfg = {
+            "Priority (všichni)": st.column_config.TextColumn("Priority (všichni)", width="medium"),
+            "Priority (přijatí)": st.column_config.TextColumn("Priority (přijatí)", width="medium"),
+            "Škola": st.column_config.TextColumn("Škola", width="large"),
+            "Obor": st.column_config.TextColumn("Obor", width="large"),
+        }
+        
+        st.dataframe(
+            pivot.style.apply(lambda row: [f'color: {color_map.get((row["Škola"], row["Obor"]), "#000000")}; font-weight: bold;' for _ in row.index], axis=1), 
+            use_container_width=True, 
+            hide_index=True,
+            column_config=col_cfg
+        )
     else:
         st.info("Žádná data pro statistiku.")
 else:
