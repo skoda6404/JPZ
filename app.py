@@ -446,6 +446,28 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     m2.metric("Úspěšnost přijetí", f"{success_rate:.1f}%")
     m3.metric("Index přetlaku", f"{competition_index:.2f}x")
     
+    # New Advanced KPIs
+    cap_rejects = len(school_data[school_data['Reason'] == 'neprijat_pro_nedostatecnou_kapacitu'])
+    cap_reject_rate = (cap_rejects / total_apps * 100) if total_apps > 0 else 0
+    
+    p1_data = school_data[school_data['Priority'] == 1]
+    p1_loyalty = (len(p1_data[p1_data['Prijat'] == 1]) / len(p1_data) * 100) if not p1_data.empty else 0
+    
+    avg_admitted = school_data[school_data['Prijat'] == 1]['TotalPoints'].mean()
+    lost_talents = school_data[school_data['Reason'] == 'prijat_na_vyssi_prioritu']
+    avg_lost = lost_talents['TotalPoints'].mean()
+    talent_gap = (avg_lost - avg_admitted) if not pd.isna(avg_lost) and not pd.isna(avg_admitted) else 0
+
+    passed_count = len(school_data[school_data['Reason'] != 'neprijat_pro_nesplneni_podminek'])
+    pure_demand_idx = (passed_count / total_admitted) if total_admitted > 0 else 0
+
+    m4, m5, m6 = st.columns(3)
+    m4.metric("Odmítnuto (kapacita)", f"{cap_reject_rate:.1f}%", help="Procento uchazečů, kteří nebyli přijati čistě z důvodu naplněné kapacity.")
+    m5.metric("Úspěšnost 1. priority", f"{p1_loyalty:.1f}%", help="Jaká byla šance na přijetí pro ty, kteří dali tuto školu na 1. místo.")
+    m6.metric("Kvalita ztracených", f"{talent_gap:+.1f} b.", help="O kolik bodů měli v průměru více ti, kteří byli přijati na školu s vyšší prioritou, než ti, které jste přijali vy.")
+    
+    st.info(f"ℹ️ **Index čistého převisu:** {pure_demand_idx:.2f} vhodných uchazečů na 1 volné místo.")
+    
     st.markdown("---")
     
     # 2. Charts Row
@@ -462,11 +484,35 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
         
         if prio_counts:
             df_prio = pd.DataFrame(prio_counts)
+            # Add totals for percentages in labels
+            total_per_obor = df_prio.groupby('Obor')['Počet'].transform('sum')
+            df_prio['Procento'] = (df_prio['Počet'] / total_per_obor * 100).round(0)
+            
             fig_prio = px.bar(df_prio, x="Obor", y="Počet", color="Priorita", 
                               title="Rozdělení priorit přihlášek",
-                              height=400,
+                              height=400, text="Počet",
+                              custom_data=["Procento"],
                               barmode="stack", color_discrete_sequence=px.colors.qualitative.Pastel)
+            
+            fig_prio.update_traces(
+                texttemplate='%{y}<br>(%{customdata[0]:.0f}%)', 
+                textposition='inside',
+                insidetextanchor='middle'
+            )
             st.plotly_chart(fig_prio, use_container_width=True)
+            
+            # Talent Comparison Chart (Tiny horizontal bar)
+            if not pd.isna(avg_admitted) and not pd.isna(avg_lost):
+                talent_df = pd.DataFrame([
+                    {"Skupina": "Naši přijatí", "Body": avg_admitted, "Barva": "green"},
+                    {"Skupina": "Utekli (vyšší priorita)", "Body": avg_lost, "Barva": "red"}
+                ])
+                fig_talent = px.bar(talent_df, x="Body", y="Skupina", orientation='h',
+                                    title="Srovnání průměrných bodů",
+                                    height=200, text=talent_df["Body"].apply(lambda x: f"{x:.1f} b."),
+                                    color="Skupina", color_discrete_map={"Naši přijatí": "#2ecc71", "Utekli (vyšší priorita)": "#e74c3c"})
+                fig_talent.update_layout(showlegend=False, xaxis_title=None, yaxis_title=None, margin=dict(l=20, r=20, t=40, b=20))
+                st.plotly_chart(fig_talent, use_container_width=True)
             
     with c2:
         st.markdown("#### Důvody nepřijetí")
