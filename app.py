@@ -13,18 +13,18 @@ from fpdf import FPDF
 st.set_page_config(page_title="JPZ", layout="wide")
 
 # --- NAVIGATION LOGIC ---
-if 'view_mode_select' not in st.session_state:
-    st.session_state['view_mode_select'] = "Srovnání škol"
+if 'view_mode' not in st.session_state:
+    st.session_state['view_mode'] = "Srovnání škol"
 
 # Handle proklik from comparison table
 if st.session_state.get('pending_nav_school'):
-    st.session_state['view_mode_select'] = "Detailní rozbor školy"
+    st.session_state['view_mode'] = "Detailní rozbor školy"
     st.session_state['single_school_select'] = st.session_state.pop('pending_nav_school')
     st.session_state['navigated_from_comparison'] = True
 
 # Handle back button
 if st.session_state.get('pending_back_nav'):
-    st.session_state['view_mode_select'] = "Srovnání škol"
+    st.session_state['view_mode'] = "Srovnání škol"
     st.session_state['navigated_from_comparison'] = False
     del st.session_state['pending_back_nav']
 
@@ -329,91 +329,63 @@ filtered_df = raw_df[raw_df['kolo'].isin(selected_rounds)] if selected_rounds el
 def get_long_format(df_in, _school_map, _kkov_map):
     if df_in.empty: return pd.DataFrame()
     
-    # Pre-calculate where each student was accepted (wide format)
-    df_in = df_in.copy()
-    df_in['AcceptedRED_IZO_Key'] = None
+    # 1. Prepare wide data with unique Student ID
+    df_wide = df_in.copy()
+    df_wide['Student_UUID'] = range(len(df_wide))
     
-    # Cast all potential RED_IZO columns to string-safe identifiers
-    riz_cols = [f'ss{j}_redizo' for j in range(1, 6) if f'ss{j}_redizo' in df_in.columns]
-    for col in riz_cols:
-        df_in[col] = pd.to_numeric(df_in[col], errors='coerce').fillna(0).astype(int).astype(str)
-
-    for j in range(1, 6):
-        r_col, p_col = f'ss{j}_redizo', f'ss{j}_prijat'
-        if r_col in df_in.columns and p_col in df_in.columns:
-            p_val = pd.to_numeric(df_in[p_col], errors='coerce')
-            mask = (df_in['AcceptedRED_IZO_Key'].isna()) & (p_val == 1)
-            df_in.loc[mask, 'AcceptedRED_IZO_Key'] = df_in.loc[mask, r_col]
-            
-    # Normalize school_map keys to strings for matching
+    # Cast RED_IZO columns to normalized strings for mapping
     str_school_map = {str(k): v for k, v in _school_map.items()}
-    df_in['AcceptedSchoolName'] = df_in['AcceptedRED_IZO_Key'].map(str_school_map).fillna("Nepřijat / neznámá")
+    riz_cols = [f'ss{j}_redizo' for j in range(1, 6) if f'ss{j}_redizo' in df_wide.columns]
+    for col in riz_cols:
+        df_wide[col] = pd.to_numeric(df_wide[col], errors='coerce').fillna(0).astype(int).astype(str)
 
     normalized_data = []
-    
-    cjl_col = 'c_procentni_skor' if 'c_procentni_skor' in df_in.columns else None
-    mat_col = 'm_procentni_skor' if 'm_procentni_skor' in df_in.columns else None
+    cjl_col = 'c_procentni_skor' if 'c_procentni_skor' in df_wide.columns else None
+    mat_col = 'm_procentni_skor' if 'm_procentni_skor' in df_wide.columns else None
     
     for i in range(1, 6):
         r_col, k_col, p_col = f'ss{i}_redizo', f'ss{i}_kkov', f'ss{i}_prijat'
         d_col = f'ss{i}_duvod_neprijeti'
         
-        if r_col in df_in.columns and k_col in df_in.columns:
-            subset = df_in[[r_col, k_col, p_col, 'kolo', 'AcceptedSchoolName']].copy()
+        if r_col in df_wide.columns and k_col in df_wide.columns:
+            subset = df_wide[['Student_UUID', r_col, k_col, p_col, 'kolo']].copy()
             subset.rename(columns={r_col: 'RED_IZO', k_col: 'KKOV', p_col: 'Prijat'}, inplace=True)
             subset['Priority'] = i
             
-            # Extract Reason
-            if d_col in df_in.columns:
-                subset['Reason'] = df_in[d_col].fillna("Neuvedeno")
+            # School Name for current row
+            subset['SchoolName'] = subset['RED_IZO'].map(str_school_map).fillna("Neznámá škola (" + subset['RED_IZO'] + ")")
+
+            # Clean Reason
+            if d_col in df_wide.columns:
+                subset['Reason'] = df_wide[d_col].fillna("Neuvedeno").astype(str).str.strip()
             else:
                 subset['Reason'] = "Neuvedeno"
 
-            # Identify Exemptions from CJL
-            # In source data, exemption might be NaN or text. 'load_year_data' coerces to NaN.
-            # So if cjl is NaN but mat is valid (not NaN), we assume exemption.
-            # We strictly check if CJL is NaN before filling it.
+            # Point Calcs and Exemption identification
+            cjl_raw = df_wide[cjl_col] if cjl_col else pd.Series(None, index=subset.index)
+            mat_raw = df_wide[mat_col] if mat_col else pd.Series(None, index=subset.index)
             
-            # Fix: Read scores from df_in and ensure correct index alignment
-            cjl_raw = df_in[cjl_col] if cjl_col else pd.Series(None, index=subset.index)
-            mat_raw = df_in[mat_col] if mat_col else pd.Series(None, index=subset.index)
-            
-            # Coerce to numeric first to turn strings to NaN, but keep NaNs as is for check
             cjl_num = pd.to_numeric(cjl_raw, errors='coerce')
             mat_num = pd.to_numeric(mat_raw, errors='coerce')
             
-            # Logic: If CJL is NaN but MAT is Valid (>=0), then Exempt.
-            # Note: A student absent from both would be NaN in both (or 0 if normalization logic filled it earlier).
-            # But here we are operating on columns from 'df_in' which were already coerced in 'load_year_data'.
-            # Wait, 'load_year_data' already did pd.to_numeric(..., errors='coerce').
-            # So if it was "Omluven", it is NaN. If it was 0, it is 0.
+            subset['IsExempt'] = cjl_num.isna() & mat_num.notna()
+            subset['TotalPoints'] = (cjl_num.fillna(0) * 0.5) + (mat_num.fillna(0) * 0.5)
             
-            subset['CJL_pct'] = cjl_num
-            subset['MAT_pct'] = mat_num
-            
-            subset['IsExempt'] =  subset['CJL_pct'].isna() & subset['MAT_pct'].notna()
-            
-            # Fill NaNs for point calc
-            subset['CJL_pct'] = subset['CJL_pct'].fillna(0)
-            subset['MAT_pct'] = subset['MAT_pct'].fillna(0)
-            
-            subset['TotalPoints'] = (subset['CJL_pct'] * 0.5) + (subset['MAT_pct'] * 0.5)
+            # Map KKOV to Name
+            subset['Grade'] = subset['KKOV'].map(get_grade_level)
+            subset['FieldName'] = subset['KKOV'].map(_kkov_map).fillna(subset['KKOV'])
+            subset['FieldLabel'] = subset['FieldName'] + " (" + subset['KKOV'] + ")"
             
             normalized_data.append(subset)
     
     if not normalized_data: return pd.DataFrame()
     res = pd.concat(normalized_data, ignore_index=True)
-    res['Grade'] = res['KKOV'].map(get_grade_level)
     
-    # Use the same string-based map for consistency
-    res['SchoolName'] = res['RED_IZO'].map(str_school_map).fillna("Neznamá škola (" + res['RED_IZO'].astype(str) + ")")
+    # 2. POST-PROCESSING: Cross-reference across all priorities for EACH student
+    # Find rows where Prijat == 1 and map their SchoolName back to all rows of same student
+    success_map = res[res['Prijat'] == 1].set_index('Student_UUID')['SchoolName'].to_dict()
+    res['AcceptedSchoolName'] = res['Student_UUID'].map(success_map).fillna("Nepřijat / neznámá")
     
-    # Map KKOV to Name
-    res['FieldName'] = res['KKOV'].map(_kkov_map).fillna(res['KKOV'])
-    res['FieldLabel'] = res['FieldName'] + " (" + res['KKOV'] + ")"
-    
-    # Clean Reason
-    res['Reason'] = res['Reason'].astype(str).str.strip()
     return res
 
 kkov_map = load_kkov_map()
@@ -434,7 +406,10 @@ else:
 
 # --- SIDEBAR: VIEW MODE ---
 st.sidebar.markdown("---")
-view_mode = st.sidebar.radio("Zobrazení", ["Srovnání škol", "Detailní rozbor školy"], key='view_mode_select')
+view_modes = ["Srovnání škol", "Detailní rozbor školy"]
+v_idx = view_modes.index(st.session_state.view_mode) if st.session_state.view_mode in view_modes else 0
+view_mode = st.sidebar.radio("Zobrazení", view_modes, index=v_idx)
+st.session_state.view_mode = view_mode
 
 # --- SIDEBAR: SELECTION FILTERS ---
 st.sidebar.markdown("---")
