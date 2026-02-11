@@ -624,17 +624,24 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
         counts = df_valid['AcceptedDetail'].value_counts().reset_index().head(10)
         counts.columns = ['Cíl (Škola + Obor)', 'Počet']
         
-        # NEW: Dynamic height based on item count to keep bar thickness consistent
-        # Base height (40) + approx 35px per row
-        calc_height = 100 + (len(counts) * 35)
+        # Wrapping long labels (approx 50 chars)
+        counts['LabelWrapped'] = counts['Cíl (Škola + Obor)'].str.wrap(50).apply(lambda x: x.replace('\n', '<br>'))
         
-        fig = px.bar(counts, x='Počet', y='Cíl (Škola + Obor)', orientation='h',
+        # Dynamic height (increased base for wrapping labels)
+        calc_height = 120 + (len(counts) * 45)
+        
+        fig = px.bar(counts, x='Počet', y='LabelWrapped', orientation='h',
                       title=title, color='Počet', color_continuous_scale=color_scale, 
                       height=calc_height, text='Počet',
                       range_x=[0, max_x * 1.1] if max_x > 0 else None)
         
         fig.update_traces(textposition='outside', cliponaxis=False)
-        fig.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(l=20, r=40, t=40, b=20))
+        fig.update_layout(
+            yaxis={'categoryorder':'total ascending', 'title': None}, 
+            xaxis={'title': 'Počet žáků'},
+            margin=dict(l=250, r=50, t=50, b=50), # Large left margin for wrapped labels
+            title_x=0.25 # Shift title slightly to the right to avoid label overlap
+        )
         st.plotly_chart(fig, use_container_width=True)
 
     # Stacked vertically as requested with synced scale
