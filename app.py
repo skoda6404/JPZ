@@ -12,6 +12,11 @@ from fpdf import FPDF
 # --- CONFIG ---
 st.set_page_config(page_title="JPZ", layout="wide")
 
+# --- NAVIGATION FIX ---
+if 'pending_nav_school' in st.session_state:
+    st.session_state['view_mode_select'] = "Detailní rozbor školy"
+    st.session_state['single_school_select'] = st.session_state.pop('pending_nav_school')
+
 def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
     pdf = FPDF()
     pdf.add_page()
@@ -28,8 +33,12 @@ def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
     pdf.cell(0, 10, clean_pdf_text("Klicove metriky skoly:"), ln=True)
     pdf.set_font("helvetica", "", 11)
     pdf.cell(60, 8, clean_pdf_text(f"Prihlasek: {kpi_data['total_apps']}"))
-    pdf.cell(60, 8, clean_pdf_text(f"Uspesnost: {kpi_data['success_rate']:.1f}%"))
-    pdf.cell(60, 8, clean_pdf_text(f"Pretlak: {kpi_data['comp_idx']:.2f}x"))
+    pdf.cell(60, 8, clean_pdf_text(f"Uspesnost: {kpi_data.get('success_rate', 0):.1f}%"))
+    pdf.cell(60, 8, clean_pdf_text(f"Pretlak: {kpi_data.get('comp_idx', 0):.2f}x"))
+    pdf.ln(10)
+    pdf.cell(60, 8, clean_pdf_text(f"Odmitnuto kapacita: {kpi_data.get('cap_reject_rate', 0):.1f}%"))
+    pdf.cell(60, 8, clean_pdf_text(f"Uspesnost P1: {kpi_data.get('p1_loyalty', 0):.1f}%"))
+    pdf.cell(60, 8, clean_pdf_text(f"Ztracene talenty: {kpi_data.get('talent_gap', 0):+.1f} b."))
     pdf.ln(15)
     
     # Table Header
@@ -655,7 +664,14 @@ if not display_df.empty:
                 csv = pivot.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(label="📥 Stáhnout jako CSV", data=csv, file_name=f'stats_{school_name.replace(" ", "_")}.csv', mime='text/csv', use_container_width=True)
             with c2:
-                kpi_data = {'total_apps': total_apps, 'success_rate': success_rate, 'comp_idx': competition_index}
+                kpi_data = {
+                    'total_apps': total_apps, 
+                    'success_rate': success_rate, 
+                    'comp_idx': competition_index,
+                    'cap_reject_rate': cap_reject_rate,
+                    'p1_loyalty': p1_loyalty,
+                    'talent_gap': talent_gap
+                }
                 pdf_bytes = create_pdf_report(school_name, selected_year, selected_rounds, pivot, kpi_data)
                 st.download_button(label="📄 Stáhnout PDF Report", data=pdf_bytes, file_name=f'report_{school_name.replace(" ", "_")}.pdf', mime='application/pdf', use_container_width=True)
 
@@ -683,8 +699,7 @@ if not display_df.empty:
         if view_mode == "Srovnání škol" and selected_row and hasattr(selected_row, "selection") and selected_row.selection.rows:
             idx = selected_row.selection.rows[0]
             school_to_detail = pivot.iloc[idx]['Škola']
-            st.session_state.view_mode_select = "Detailní rozbor školy"
-            st.session_state.single_school_select = school_to_detail
+            st.session_state['pending_nav_school'] = school_to_detail
             st.rerun()
     else:
         st.info("Žádná data pro statistiku.")
