@@ -236,6 +236,7 @@ def get_long_format(df_in, _school_map, _kkov_map):
         if r_col in df_in.columns and k_col in df_in.columns:
             subset = df_in[[r_col, k_col, p_col, 'kolo']].copy()
             subset.rename(columns={r_col: 'RED_IZO', k_col: 'KKOV', p_col: 'Prijat'}, inplace=True)
+            subset['Priority'] = i
             
             # Extract Reason
             if d_col in df_in.columns:
@@ -408,6 +409,17 @@ for i, ((school, field), group) in enumerate(groups):
     color = colors[i % len(colors)]
     color_map[(school, field)] = color
     
+    # Calculate Priority Distributions for the group
+    dist_all = []
+    dist_adm = []
+    for prio in range(1, 6):
+        cnt_all = len(group[group['Priority'] == prio])
+        cnt_adm = len(group[(group['Prijat'] == 1) & (group['Priority'] == prio)])
+        dist_all.append(str(cnt_all))
+        dist_adm.append(str(cnt_adm))
+    priority_dist_all_str = " + ".join(dist_all)
+    priority_dist_admitted_str = " + ".join(dist_adm)
+
     # Clean Reason
     group['ReasonClean'] = group['Reason'].replace(['nan', 'None', '', 'nan'], 'Neuvedeno')
     group.loc[group['Prijat'] == 1, 'ReasonClean'] = 'PŘIJAT'
@@ -434,6 +446,8 @@ for i, ((school, field), group) in enumerate(groups):
             "SchoolName": school,
             "KKOV": field,
             "TotalCount": len(group), # Store total for the group
+            "PriorityDistAll": priority_dist_all_str,
+            "PriorityDistAdm": priority_dist_admitted_str,
             "MinScore": min_score_val,
             "Reason": reason,
             "Počet": cnt_regular,
@@ -467,8 +481,8 @@ if stats_base:
     df_base['ReasonShort'] = df_base['Reason'].map(get_reason_label)
     
     # Pivot
-    # We include TotalCount and MinScore in index so it is preserved, then reset
-    pivot = df_base.pivot(index=['SchoolName', 'KKOV', 'TotalCount', 'MinScore'], columns='ReasonShort', values='DisplayVal')
+    # We include TotalCount, PriorityDistAll, PriorityDistAdm and MinScore in index so it is preserved, then reset
+    pivot = df_base.pivot(index=['SchoolName', 'KKOV', 'TotalCount', 'PriorityDistAll', 'PriorityDistAdm', 'MinScore'], columns='ReasonShort', values='DisplayVal')
     
     # Columns are now just the reason names. 
     # Optional: Reorder columns? PŘIJAT first?
@@ -483,8 +497,29 @@ if stats_base:
         'SchoolName': 'Škola', 
         'KKOV': 'Obor', 
         'TotalCount': 'Celkem přihlášek',
-        'MinScore': 'Poslední přijatý (body)'
+        'PriorityDistAll': 'Priority (všichni)',
+        'MinScore': 'Poslední přijatý (body)',
+        'PriorityDistAdm': 'Priority (přijatí)'
     }, inplace=True)
+    
+    # Reorder columns to place PriorityDistAdm after PŘIJAT (which is roughly the 7th column now)
+    # Existing order after rename: Škola, Obor, Celkem přihlášek, Priority (všichni), Priority (přijatí), Poslední přijatý (body), PŘIJAT, ...
+    # We want: Škola, Obor, Celkem přihlášek, Priority (všichni), Poslední přijatý (body), PŘIJAT, Priority (přijatí), Vyšší priorita, ...
+    
+    current_cols = pivot.columns.tolist()
+    final_cols = ['Škola', 'Obor', 'Celkem přihlášek', 'Priority (všichni)', 'Poslední přijatý (body)']
+    
+    if 'PŘIJAT' in current_cols:
+        final_cols.append('PŘIJAT')
+        if 'Priority (přijatí)' in current_cols:
+            final_cols.append('Priority (přijatí)')
+    
+    # Add remaining columns
+    for c in current_cols:
+        if c not in final_cols:
+            final_cols.append(c)
+    
+    pivot = pivot[final_cols]
     
     # Fill NaN (where reason didn't exist for that school)
     pivot = pivot.fillna("-") 
