@@ -526,16 +526,22 @@ if not display_df.empty:
     for i, ((school, field), group) in enumerate(groups):
         color = colors[i % len(colors)]
         color_map[(school, field)] = color
-        dist_all = []; dist_adm = []
+        dist_all_cnt = []; dist_all_pct = []
+        dist_adm_cnt = []; dist_adm_pct = []
         total_group = len(group); total_adm = len(group[group['Prijat'] == 1])
         for prio in range(1, 6):
             cnt_all = len(group[group['Priority'] == prio])
             pct_all = (cnt_all / total_group * 100) if total_group > 0 else 0
-            dist_all.append(f"{cnt_all}\n({round(pct_all)}%)")
+            dist_all_cnt.append(str(cnt_all))
+            dist_all_pct.append(f"({round(pct_all)}%)")
+            
             cnt_adm = len(group[(group['Prijat'] == 1) & (group['Priority'] == prio)])
             pct_adm = (cnt_adm / total_adm * 100) if total_adm > 0 else 0
-            dist_adm.append(f"{cnt_adm}\n({round(pct_adm)}%)")
-        priority_dist_all_str = " | ".join(dist_all); priority_dist_admitted_str = " | ".join(dist_adm)
+            dist_adm_cnt.append(str(cnt_adm))
+            dist_adm_pct.append(f"({round(pct_adm)}%)")
+            
+        priority_dist_all_str = " | ".join(dist_all_cnt) + "\n" + " ".join(dist_all_pct)
+        priority_dist_admitted_str = " | ".join(dist_adm_cnt) + "\n" + " ".join(dist_adm_pct)
         
         # Calculate Elite Average (Top 10% of applicants in the field)
         top_10_count = max(1, round(len(group) * 0.1))
@@ -554,10 +560,10 @@ if not display_df.empty:
             stats_base.append({
                 "SchoolName": school, "KKOV": field, "TotalCount": len(group),
                 "PriorityDistAll": priority_dist_all_str, "PriorityDistAdm": priority_dist_admitted_str,
-                "EliteAvg": round(elite_avg, 1) if elite_avg else None,
-                "MinScore": round(min_score_val, 1) if min_score_val else None, 
+                "EliteAvg": f"{elite_avg:.1f}" if elite_avg else "-",
+                "MinScore": f"{min_score_val:.1f}" if min_score_val else "-", 
                 "Reason": reason, "Počet": cnt_regular,
-                "Průměr": avg_points_reg, "Cizinci": cnt_exempt
+                "Průměr": f"{avg_points_reg:.1f}", "Cizinci": cnt_exempt
             })
 
     if stats_base:
@@ -566,16 +572,16 @@ if not display_df.empty:
         df_base['ReasonShort'] = df_base['Reason'].map(get_reason_label)
         pivot = df_base.pivot(index=['SchoolName', 'KKOV', 'TotalCount', 'PriorityDistAll', 'PriorityDistAdm', 'EliteAvg', 'MinScore'], columns='ReasonShort', values='DisplayVal').reset_index()
         pivot.rename(columns={
-            'SchoolName': 'Škola', 'KKOV': 'Obor', 'TotalCount': 'Celkem přihlášek', 
-            'PriorityDistAll': 'Priority (všichni)', 'MinScore': 'Poslední přijatý (body)', 
-            'PriorityDistAdm': 'Priority (přijatí)', 'EliteAvg': 'Elitní průměr (10%)'
+            'SchoolName': 'Škola', 'KKOV': 'Obor', 'TotalCount': 'Přihlášek', 
+            'PriorityDistAll': 'Priority\n(všichni)', 'MinScore': 'Poslední\npřijatý', 
+            'PriorityDistAdm': 'Priority\n(přijatí)', 'EliteAvg': 'Elitní\nprůměr'
         }, inplace=True)
         
         current_cols = pivot.columns.tolist()
-        final_cols = ['Škola', 'Obor', 'Celkem přihlášek', 'Priority (všichni)', 'Poslední přijatý (body)', 'Elitní průměr (10%)']
+        final_cols = ['Škola', 'Obor', 'Přihlášek', 'Priority\n(všichni)', 'Poslední\npřijatý', 'Elitní\nprůměr']
         if 'PŘIJAT' in current_cols:
             final_cols.append('PŘIJAT')
-            if 'Priority (přijatí)' in current_cols: final_cols.append('Priority (přijatí)')
+            if 'Priority\n(přijatí)' in current_cols: final_cols.append('Priority\n(přijatí)')
         for c in current_cols:
             if c not in final_cols: final_cols.append(c)
         pivot = pivot[final_cols].fillna("-")
@@ -593,10 +599,13 @@ if not display_df.empty:
 
         # Style columns for wrapping and alignment
         col_cfg = {
-            "Priority (všichni)": st.column_config.TextColumn("Priority (všichni)", width="medium"),
-            "Priority (přijatí)": st.column_config.TextColumn("Priority (přijatí)", width="medium"),
-            "Škola": st.column_config.TextColumn("Škola", width="large"),
-            "Obor": st.column_config.TextColumn("Obor", width="large"),
+            "Priority\n(všichni)": st.column_config.TextColumn("Priority\n(všichni)", width="small"),
+            "Priority\n(přijatí)": st.column_config.TextColumn("Priority\n(přijatí)", width="small"),
+            "Škola": st.column_config.TextColumn("Škola", width="medium"),
+            "Obor": st.column_config.TextColumn("Obor", width="medium"),
+            "Poslední\npřijatý": st.column_config.TextColumn("Min. body", width="small"),
+            "Elitní\nprůměr": st.column_config.TextColumn("Elita", width="small"),
+            "Přihlášek": st.column_config.NumberColumn("Přihlášek", width="small"),
         }
         
         st.dataframe(
