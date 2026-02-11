@@ -12,12 +12,17 @@ from fpdf import FPDF
 # --- CONFIG ---
 st.set_page_config(page_title="JPZ", layout="wide")
 
-# --- NAVIGATION FIX ---
-if 'pending_nav_school' in st.session_state:
+# --- NAVIGATION LOGIC ---
+if 'view_mode_select' not in st.session_state:
+    st.session_state['view_mode_select'] = "Srovnání škol"
+
+# Handle proklik from comparison table
+if st.session_state.get('pending_nav_school'):
     st.session_state['view_mode_select'] = "Detailní rozbor školy"
     st.session_state['single_school_select'] = st.session_state.pop('pending_nav_school')
     st.session_state['navigated_from_comparison'] = True
 
+# Handle back button
 if st.session_state.get('pending_back_nav'):
     st.session_state['view_mode_select'] = "Srovnání škol"
     st.session_state['navigated_from_comparison'] = False
@@ -326,26 +331,23 @@ def get_long_format(df_in, _school_map, _kkov_map):
     
     # Pre-calculate where each student was accepted (wide format)
     df_in = df_in.copy()
-    df_in['AcceptedRED_IZO'] = None
+    df_in['AcceptedRED_IZO_Key'] = None
+    
+    # Cast all potential RED_IZO columns to string-safe identifiers
+    riz_cols = [f'ss{j}_redizo' for j in range(1, 6) if f'ss{j}_redizo' in df_in.columns]
+    for col in riz_cols:
+        df_in[col] = pd.to_numeric(df_in[col], errors='coerce').fillna(0).astype(int).astype(str)
+
     for j in range(1, 6):
         r_col, p_col = f'ss{j}_redizo', f'ss{j}_prijat'
         if r_col in df_in.columns and p_col in df_in.columns:
-            # Cast to numeric to handle cases where it might be string or float
             p_val = pd.to_numeric(df_in[p_col], errors='coerce')
-            mask = (df_in['AcceptedRED_IZO'].isna()) & (p_val == 1)
-            # Ensure REDIZO is matched as normalized string/int
-            df_in.loc[mask, 'AcceptedRED_IZO'] = df_in.loc[mask, r_col]
-    
-    # Normalize RED_IZO for mapping (ensure it's INT matching the map keys)
-    def normalize_redizo(val):
-        if pd.isna(val): return None
-        try:
-            return int(float(val))
-        except:
-            return val
-
-    df_in['AcceptedRED_IZO_norm'] = df_in['AcceptedRED_IZO'].apply(normalize_redizo)
-    df_in['AcceptedSchoolName'] = df_in['AcceptedRED_IZO_norm'].map(_school_map).fillna("Nepřijat / neznámá")
+            mask = (df_in['AcceptedRED_IZO_Key'].isna()) & (p_val == 1)
+            df_in.loc[mask, 'AcceptedRED_IZO_Key'] = df_in.loc[mask, r_col]
+            
+    # Normalize school_map keys to strings for matching
+    str_school_map = {str(k): v for k, v in _school_map.items()}
+    df_in['AcceptedSchoolName'] = df_in['AcceptedRED_IZO_Key'].map(str_school_map).fillna("Nepřijat / neznámá")
 
     normalized_data = []
     
@@ -402,10 +404,12 @@ def get_long_format(df_in, _school_map, _kkov_map):
     if not normalized_data: return pd.DataFrame()
     res = pd.concat(normalized_data, ignore_index=True)
     res['Grade'] = res['KKOV'].map(get_grade_level)
-    res['SchoolName'] = res['RED_IZO'].map(_school_map).fillna("Neznamá škola (" + res['RED_IZO'].astype(str).str.replace('.0','') + ")")
+    
+    # Use the same string-based map for consistency
+    res['SchoolName'] = res['RED_IZO'].map(str_school_map).fillna("Neznamá škola (" + res['RED_IZO'].astype(str) + ")")
+    
     # Map KKOV to Name
     res['FieldName'] = res['KKOV'].map(_kkov_map).fillna(res['KKOV'])
-    # Combine for display if needed, but keeping separate is better for filtering
     res['FieldLabel'] = res['FieldName'] + " (" + res['KKOV'] + ")"
     
     # Clean Reason
