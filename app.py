@@ -663,12 +663,22 @@ if not display_df.empty:
             "Přihlášek": st.column_config.NumberColumn("Přihlášek", width="small"),
         }
         
-        st.dataframe(
+        selected_row = st.dataframe(
             pivot.style.apply(lambda row: [f'color: {color_map.get((row["Škola"], row["Obor"]), "#000000")}; font-weight: bold;' for _ in row.index], axis=1), 
             use_container_width=True, 
             hide_index=True,
-            column_config=col_cfg
+            column_config=col_cfg,
+            on_select="rerun",
+            selection_mode="single_row"
         )
+        
+        # Automatic navigation to detail mode
+        if view_mode == "Srovnání škol" and selected_row and hasattr(selected_row, "selection") and selected_row.selection.rows:
+            idx = selected_row.selection.rows[0]
+            school_to_detail = pivot.iloc[idx]['Škola']
+            st.session_state.view_mode_select = "Detailní rozbor školy"
+            st.session_state.single_school_select = school_to_detail
+            st.rerun()
     else:
         st.info("Žádná data pro statistiku.")
 else:
