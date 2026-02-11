@@ -568,7 +568,7 @@ if not display_df.empty:
 
     if stats_base:
         df_base = pd.DataFrame(stats_base)
-        df_base['DisplayVal'] = df_base.apply(lambda row: f"{int(row['Počet'])} / {row['Průměr']:.1f}" + (f" (+{int(row['Cizinci'])} ciz)" if row['Cizinci'] > 0 else ""), axis=1)
+        df_base['DisplayVal'] = df_base.apply(lambda row: f"{int(row['Počet'])} / {row['Průměr']}" + (f" (+{int(row['Cizinci'])} ciz)" if row['Cizinci'] > 0 else ""), axis=1)
         df_base['ReasonShort'] = df_base['Reason'].map(get_reason_label)
         pivot = df_base.pivot(index=['SchoolName', 'KKOV', 'TotalCount', 'PriorityDistAll', 'PriorityDistAdm', 'EliteAvg', 'MinScore'], columns='ReasonShort', values='DisplayVal').reset_index()
         pivot.rename(columns={
