@@ -205,7 +205,7 @@ if not long_df.empty:
             if selected_schools:
                 from src.storage import get_export_json
                 export_data = get_export_json("vyber", selected_schools, selected_fields)
-                st.download_button("📩 Uložit výběr do souboru", data=export_data, file_name="prijimacky_vyber.json", mime="application/json", use_container_width=True)
+                st.download_button("📩 Uložit výběr do souboru", data=export_data, file_name="prijimacky_vyber.json", mime="application/json", width='stretch')
             
             st.markdown("---")
             st.markdown("📂 **Nahrát výběr ze souboru**")
@@ -239,7 +239,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     
     # Back button - strictly only if navigated from comparison
     if st.session_state.get('navigated_from_comparison'):
-        if st.button("⬅️ Zpět na srovnání", use_container_width=True):
+        if st.button("⬅️ Zpět na srovnání", width='stretch'):
             st.session_state['pending_back_nav'] = True
             st.rerun()
 
@@ -287,7 +287,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
                 fig_pts.add_trace(go.Scatter(x=exempt[x_col], y=exempt['TotalPoints'], mode='markers', name=f"{label} (Odp. CJL)", marker=dict(color=color, symbol='x-thin', size=10), showlegend=False))
         
         fig_pts.update_layout(xaxis_title="Procenta (%)" if use_deciles else "Pořadí", yaxis_title="Body", template="plotly_white", height=400, margin=dict(l=40, r=40, t=20, b=40), legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="left", x=0))
-        st.plotly_chart(fig_pts, use_container_width=True)
+        st.plotly_chart(fig_pts, width='stretch')
     
     st.markdown("---")
     
@@ -336,7 +336,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
                               barmode="stack", color_discrete_sequence=px.colors.qualitative.Pastel)
             fig_prio.update_traces(textposition='inside', textfont_size=12)
             fig_prio.update_layout(yaxis_title="Procento (%)", showlegend=False)
-            st.plotly_chart(fig_prio, use_container_width=True)
+            st.plotly_chart(fig_prio, width='stretch')
 
     with c2:
         st.markdown("#### ✅ Priority PŘIJATÝCH (%)")
@@ -361,7 +361,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
                                   barmode="stack", color_discrete_sequence=px.colors.qualitative.Pastel)
             fig_prio_adm.update_traces(textposition='inside', textfont_size=12)
             fig_prio_adm.update_layout(yaxis_title="Procento (%)")
-            st.plotly_chart(fig_prio_adm, use_container_width=True)
+            st.plotly_chart(fig_prio_adm, width='stretch')
 
     st.markdown("---")
     
@@ -375,7 +375,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
         fig_pie = px.pie(reason_counts, values='Počet', names='Důvod Label', 
                          hole=0.4, height=350)
         fig_pie.update_layout(margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=-0.2))
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width='stretch')
 
     st.markdown("---")
     
@@ -420,7 +420,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
                 margin=dict(l=20, r=50, t=50, b=50),
                 title_x=0.0
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         except Exception as e:
             st.warning(f"Chyba při vykreslování grafu '{title}': {e}")
 
@@ -442,7 +442,7 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
                             height=200, text=talent_df["Body"].apply(lambda x: f"{x:.1f} b."),
                             color="Skupina", color_discrete_map={"Naši přijatí": "#2ecc71", "Utekli (vyšší priorita)": "#e74c3c"})
         fig_talent.update_layout(showlegend=False, xaxis_title=None, yaxis_title=None, margin=dict(l=20, r=20, t=40, b=20))
-        st.plotly_chart(fig_talent, use_container_width=True)
+        st.plotly_chart(fig_talent, width='stretch')
 
     # 3. Detailed Stats Table
     # (The shared table logic below will use this display_df)
@@ -504,7 +504,7 @@ if view_mode == "Srovnání škol":
             if not exempt.empty:
                 fig.add_trace(go.Scatter(x=exempt[x_col], y=exempt['TotalPoints'], mode='markers', name=f"{label} (Odp. CJL)", legendgroup=label, marker=dict(color=color, symbol='x-thin', size=10, line=dict(color=color, width=2)), showlegend=False, hovertemplate="<b>%{text}</b><br>"+x_col+": %{x}<br>Points: %{y}<extra></extra>", text=[f"{label} (Odp. CJL)"] * len(exempt)))
         fig.update_layout(xaxis_title="Procenta (%)" if use_deciles_comp else "Pořadí", yaxis_title="Body", template="plotly_white", height=700, margin=dict(l=40, r=40, t=20, b=40), legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="left", x=0), showlegend=True)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     # --- Metric Comparison Block ---
     st.markdown("---")
@@ -663,7 +663,7 @@ if view_mode == "Srovnání škol":
             showlegend=False,
             margin=dict(l=20, r=80, t=30, b=10) # Increased right margin for labels
         )
-        st.plotly_chart(fig_metric, use_container_width=True)
+        st.plotly_chart(fig_metric, width='stretch')
     else:
         st.info(f"💡 Metrika **{selected_metric}** není pro vybrané školy relevantní. Pravděpodobně nenaplnily kapacitu, takže u nich nedošlo k omezení výběru a metrika 'hranice' u nich neexistuje.")
 
@@ -759,11 +759,11 @@ if not display_df.empty:
             c1, c2 = st.columns(2)
             with c1:
                 csv = df_stats.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(label="📥 Stáhnout jako CSV", data=csv, file_name=f'stats_{school_name.replace(" ", "_")}.csv', mime='text/csv', use_container_width=True)
+                st.download_button(label="📥 Stáhnout jako CSV", data=csv, file_name=f'stats_{school_name.replace(" ", "_")}.csv', mime='text/csv', width='stretch')
             with c2:
                 kpi_data = calculate_kpis(school_data)
                 pdf_bytes = create_pdf_report(school_name, selected_year, selected_rounds, df_stats, kpi_data)
-                st.download_button(label="📄 Stáhnout PDF Report", data=pdf_bytes, file_name=f'report_{school_name.replace(" ", "_")}.pdf', mime='application/pdf', use_container_width=True)
+                st.download_button(label="📄 Stáhnout PDF Report", data=pdf_bytes, file_name=f'report_{school_name.replace(" ", "_")}.pdf', mime='application/pdf', width='stretch')
 
         col_cfg = {
             "Škola": st.column_config.TextColumn("Škola", width=180),
@@ -782,7 +782,7 @@ if not display_df.empty:
         
         selected_row = st.dataframe(
             df_stats.style.apply(lambda row: [f'color: {color_map.get((row["Škola"], row["Obor"]), "#000000")}; font-weight: bold;' for _ in row.index], axis=1), 
-            use_container_width=True, 
+            width='stretch', 
             hide_index=True,
             column_config=col_cfg,
             on_select="rerun",
