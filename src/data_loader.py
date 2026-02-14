@@ -43,9 +43,9 @@ def normalize_column_name(col):
 def load_school_map():
     """Loads the school mapping (both RED_IZO and IZO -> Names)"""
     try:
-        df = pd.read_csv('skoly.csv', encoding='cp1250', sep=';')
+        df = pd.read_csv('skoly.csv', encoding='cp1250', sep=';', low_memory=False)
     except:
-        df = pd.read_csv('skoly.csv', encoding='utf-8', sep=';')
+        df = pd.read_csv('skoly.csv', encoding='utf-8', sep=';', low_memory=False)
     
     mapping = {}
     df['is_school'] = df['Nazev'].fillna('').astype(str).str.contains('škola|Gymnázium|Lyceum', case=False)
@@ -82,9 +82,9 @@ def load_izo_to_redizo_map():
     Student data uses facility IZOs in the ss_redizo columns, while capacity
     files use institution-level REDIZOs. This mapping translates between them."""
     try:
-        df = pd.read_csv('skoly.csv', encoding='cp1250', sep=';')
+        df = pd.read_csv('skoly.csv', encoding='cp1250', sep=';', low_memory=False)
     except:
-        df = pd.read_csv('skoly.csv', encoding='utf-8', sep=';')
+        df = pd.read_csv('skoly.csv', encoding='utf-8', sep=';', low_memory=False)
     
     izo_to_redizo = {}
     for _, row in df.iterrows():
