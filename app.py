@@ -252,14 +252,13 @@ if not grade_filtered_df.empty:
     else:
         # Detail Mode: Select single school
         st.sidebar.markdown("### 🏛️ Výběr školy")
-        # available_schools is already calculated from wide data above
         
+        # Valid state check - ensuring single_school_select is always one of available_schools
         if 'single_school_select' not in st.session_state or st.session_state['single_school_select'] not in available_schools:
-             default_idx = None
-        else:
-             default_idx = available_schools.index(st.session_state['single_school_select'])
+             st.session_state['single_school_select'] = available_schools[0] if available_schools else None
 
-        selected_school = st.sidebar.selectbox("Škola pro detail", options=available_schools, index=default_idx, key='single_school_select', placeholder="Zvolte...")
+        # Key is already in session state with a valid value (or None), so we don't need 'index'
+        selected_school = st.sidebar.selectbox("Škola pro detail", options=available_schools, key='single_school_select', placeholder="Zvolte...")
         selected_schools = [selected_school] if selected_school else []
         
         # LATE TRANSFORMATION for single school
@@ -268,13 +267,16 @@ if not grade_filtered_df.empty:
         if not long_df.empty:
             available_fields = sorted(long_df['FieldLabel'].unique().astype(str).tolist())
             
-            # Clear stale field selection if it contains values not in current school's fields
-            if 'detail_fields_select' in st.session_state:
+            # Reset field selection if it's new school OR contains invalid fields
+            if 'detail_fields_select' not in st.session_state:
+                st.session_state['detail_fields_select'] = available_fields
+            else:
                 current_sel = st.session_state['detail_fields_select']
+                # If any selected field is not in available_fields, reset to all
                 if any(f not in available_fields for f in current_sel):
                     st.session_state['detail_fields_select'] = available_fields
             
-            selected_fields = st.sidebar.multiselect("Vyberte obory", options=available_fields, default=available_fields, key='detail_fields_select', placeholder="Zvolte...")
+            selected_fields = st.sidebar.multiselect("Vyberte obory", options=available_fields, key='detail_fields_select', placeholder="Zvolte...")
         else:
             selected_fields = []
 else:

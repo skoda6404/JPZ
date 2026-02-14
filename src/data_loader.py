@@ -313,5 +313,10 @@ def get_long_format(df_in, _school_map, _kkov_map, school_names_filter=None):
     # 2. POST-PROCESSING: Apply pre-calculated mapping
     res['AcceptedSchoolName'] = res['Student_UUID'].map(success_map_school).fillna("Nepřijat / neznámá")
     res['AcceptedDetail'] = res['Student_UUID'].map(success_map_detail).fillna("Nepřijat / neznámá")
+
+    # 3. FINAL FILTER: If filtering by schools, ensure we ONLY return those schools
+    # (previous df_wide filter only reduced the student count, but students have multiple applications)
+    if school_names_filter:
+        res = res[res['SchoolName'].isin(school_names_filter)]
     
     return res
