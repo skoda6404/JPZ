@@ -168,7 +168,8 @@ if not long_df.empty:
         
         # Apply pending upload BEFORE widgets render (safe timing)
         if '_pending_upload_schools' in st.session_state:
-            st.session_state['schools_select_v2'] = st.session_state.pop('_pending_upload_schools')
+            validated_schools = [s for s in st.session_state.pop('_pending_upload_schools') if s in available_schools]
+            st.session_state['schools_select_v2'] = validated_schools
         if '_pending_upload_fields' in st.session_state:
             # Validate fields against the schools that will be selected
             pending_schools = st.session_state.get('schools_select_v2', [])
@@ -178,6 +179,10 @@ if not long_df.empty:
                 st.session_state['fields_select_v2'] = validated_fields
             del st.session_state['_pending_upload_fields']
         
+        # Validate existing widget keys against current options (prevents stale-key crashes)
+        if 'schools_select_v2' in st.session_state:
+            st.session_state['schools_select_v2'] = [s for s in st.session_state['schools_select_v2'] if s in available_schools]
+        
         selected_schools = st.sidebar.multiselect("Vyberte školy", options=available_schools, key='schools_select_v2', placeholder="Zvolte...")
         st.session_state.selected_schools = selected_schools
         
@@ -185,6 +190,11 @@ if not long_df.empty:
         if selected_schools:
             school_sub = long_df[long_df['SchoolName'].isin(selected_schools)]
             available_fields = sorted(school_sub['FieldLabel'].unique().tolist())
+        
+        # Validate existing field selection against current options
+        if 'fields_select_v2' in st.session_state:
+            st.session_state['fields_select_v2'] = [f for f in st.session_state['fields_select_v2'] if f in available_fields]
+        
         selected_fields = st.sidebar.multiselect("Vyberte obory", options=available_fields, key='fields_select_v2', placeholder="Zvolte...")
         
         # --- CALLBACK FOR LOADING SELECTION ---
