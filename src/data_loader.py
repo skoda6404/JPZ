@@ -244,7 +244,7 @@ def get_long_format(df_in, _school_map, _kkov_map, school_names_filter=None):
                     success_map_school[uuid] = school_name
                     
                     # Map FieldLabel
-                    kkov = str(row[k_col])
+                    kkov = str(row[k_col]) if pd.notna(row[k_col]) else "?"
                     field_name = _kkov_map.get(kkov, kkov)
                     field_label = f"{field_name} ({kkov})"
                     success_map_detail[uuid] = f"{school_name} ({field_label})"
@@ -293,8 +293,9 @@ def get_long_format(df_in, _school_map, _kkov_map, school_names_filter=None):
             
             # Map KKOV to Name
             subset['Grade'] = subset['KKOV'].map(get_grade_level)
-            subset['FieldName'] = subset['KKOV'].map(_kkov_map).fillna(subset['KKOV'])
-            subset['FieldLabel'] = subset['FieldName'] + " (" + subset['KKOV'] + ")"
+            kkov_val = subset['KKOV'].astype(str).fillna("?")
+            subset['FieldName'] = subset['KKOV'].astype(str).map(_kkov_map).fillna(kkov_val)
+            subset['FieldLabel'] = subset['FieldName'].astype(str) + " (" + kkov_val + ")"
             
             # Detect "vzdal se přijetí"
             subset['GaveUpSpot'] = subset['Reason'].str.contains('vzdal', case=False, na=False)

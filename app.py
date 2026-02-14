@@ -191,7 +191,7 @@ if not grade_filtered_df.empty:
             if pending_schools:
                 # We need a small long_df to get field names for validation
                 val_df = get_long_format(grade_filtered_df, school_map, kkov_map, school_names_filter=pending_schools)
-                valid_field_options = sorted(val_df['FieldLabel'].unique().tolist()) if not val_df.empty else []
+                valid_field_options = sorted(val_df['FieldLabel'].unique().astype(str).tolist()) if not val_df.empty else []
                 validated_fields = [f for f in st.session_state['_pending_upload_fields'] if f in valid_field_options]
                 st.session_state['fields_select_v2'] = validated_fields
             del st.session_state['_pending_upload_fields']
@@ -208,7 +208,7 @@ if not grade_filtered_df.empty:
         
         available_fields = []
         if not long_df.empty:
-            available_fields = sorted(long_df['FieldLabel'].unique().tolist())
+            available_fields = sorted(long_df['FieldLabel'].unique().astype(str).tolist())
         
         # Validate existing field selection against current options
         if 'fields_select_v2' in st.session_state:
@@ -266,7 +266,7 @@ if not grade_filtered_df.empty:
         long_df = get_long_format(grade_filtered_df, school_map, kkov_map, school_names_filter=selected_schools)
         
         if not long_df.empty:
-            available_fields = sorted(long_df['FieldLabel'].unique().tolist())
+            available_fields = sorted(long_df['FieldLabel'].unique().astype(str).tolist())
             
             # Clear stale field selection if it contains values not in current school's fields
             if 'detail_fields_select' in st.session_state:
