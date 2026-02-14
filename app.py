@@ -225,6 +225,13 @@ if not long_df.empty:
         if selected_school:
             school_sub = long_df[long_df['SchoolName'] == selected_school]
             available_fields = sorted(school_sub['FieldLabel'].unique().tolist())
+            
+            # Clear stale field selection if it contains values not in current school's fields
+            if 'detail_fields_select' in st.session_state:
+                current_sel = st.session_state['detail_fields_select']
+                if any(f not in available_fields for f in current_sel):
+                    st.session_state['detail_fields_select'] = available_fields
+            
             selected_fields = st.sidebar.multiselect("Vyberte obory", options=available_fields, default=available_fields, key='detail_fields_select', placeholder="Zvolte...")
         else:
             selected_fields = []
