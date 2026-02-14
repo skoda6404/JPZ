@@ -2,7 +2,22 @@
 
 Všechny významné změny v projektu JPZ budou zaznamenány v tomto souboru.
 
-## [3.0.0] - 2026-02-14
+## [3.1.0] - 2026-02-15
+
+### Přidáno
+- **Lazy Data Transformation**: On-demand zpracování dlouhého formátu dat pouze pro vybrané školy.
+- **Pre-calculated Flags**: Boolean příznaky (`is_capacity_reject` atd.) v datech pro bleskový výpočet KPI bez regulárních výrazů.
+- **Lightweight Sidebar loading**: Načítání seznamů škol a ročníků přímo ze surových dat (šetří stovky MB RAM).
+
+### Změněno
+- **Optimalizace paměti**: Snížení paměťové náročnosti o ~90 % při startu aplikace a načítání uložených výběrů.
+- **Robustní řazení**: Všechny seznamy oborů jsou řazeny s podporou pro chybějící data (`TypeError` fix).
+- **Isolace dat**: V detailním rozboru školy se nyní zobrazují výhradně data pro vybranou školu (fix "field leak").
+
+### Opraveno
+- **Streamlit Cloud Crash**: Vyřešeny timeouty a pády při načítání velkých datasetů.
+- **Widget State Warnings**: Odstraněno hlášení "The widget with key 'single_school_select' was created with a default value...".
+- **DtypeWarning**: Přidání `low_memory=False` u načítání CSV souborů.
 
 ### Přidáno
 
