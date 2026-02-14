@@ -6,7 +6,6 @@ import sys
 import re
 import json
 import io
-import traceback
 
 from src.data_loader import load_year_data, load_school_map, load_kkov_map, get_long_format, normalize_column_name, load_capacity_data, load_izo_to_redizo_map
 from src.utils import get_grade_level, get_reason_label, clean_pdf_text, clean_col_name, reason_map
@@ -17,41 +16,29 @@ from src.analysis import calculate_kpis, get_decile_data
 # --- CONFIG ---
 st.set_page_config(page_title="JPZ", layout="wide")
 
-# --- ERROR LOGGING (for Cloud diagnostics) ---
-def _log_error(context, e):
-    """Log error to stderr (Cloud logs) and session state (page display)."""
-    err_msg = f"[JPZ ERROR] {context}: {type(e).__name__}: {e}"
-    tb = traceback.format_exc()
-    print(err_msg, file=sys.stderr)
-    print(tb, file=sys.stderr)
-    st.session_state['_last_error'] = f"{err_msg}\n{tb}"
-
 # --- NAVIGATION LOGIC ---
 if 'view_mode' not in st.session_state:
     st.session_state.view_mode = "Srovnání škol"
 
-try:
-    # Apply pending navigation flags safely
-    if st.session_state.get('pending_nav_school'):
-        st.session_state['single_school_select'] = st.session_state['pending_nav_school']
-        st.session_state.view_mode = "Detailní rozbor školy"
-        st.session_state['navigated_from_comparison'] = True
-        del st.session_state['pending_nav_school']
-    
-    if st.session_state.get('pending_back_nav'):
-        st.session_state.view_mode = "Srovnání škol"
-        del st.session_state['pending_back_nav']
-        st.session_state['navigated_from_comparison'] = False
-        # Clean up detail-mode widget keys to prevent orphaned state conflicts
-        for key in ['detail_fields_select', 'single_school_select']:
-            if key in st.session_state:
-                del st.session_state[key]
-        if 'saved_schools_selection' in st.session_state:
-            st.session_state['_pending_upload_schools'] = st.session_state['saved_schools_selection']
-        if 'saved_fields_selection' in st.session_state:
-            st.session_state['_pending_upload_fields'] = st.session_state['saved_fields_selection']
-except Exception as e:
-    _log_error("Navigation flags", e)
+# Apply pending navigation flags safely
+if st.session_state.get('pending_nav_school'):
+    st.session_state['single_school_select'] = st.session_state['pending_nav_school']
+    st.session_state.view_mode = "Detailní rozbor školy"
+    st.session_state['navigated_from_comparison'] = True
+    del st.session_state['pending_nav_school']
+
+if st.session_state.get('pending_back_nav'):
+    st.session_state.view_mode = "Srovnání škol"
+    del st.session_state['pending_back_nav']
+    st.session_state['navigated_from_comparison'] = False
+    # Clean up detail-mode widget keys to prevent orphaned state conflicts
+    for key in ['detail_fields_select', 'single_school_select']:
+        if key in st.session_state:
+            del st.session_state[key]
+    if 'saved_schools_selection' in st.session_state:
+        st.session_state['_pending_upload_schools'] = st.session_state['saved_schools_selection']
+    if 'saved_fields_selection' in st.session_state:
+        st.session_state['_pending_upload_fields'] = st.session_state['saved_fields_selection']
 
 # --- UI INITIALIZATION ---
 inject_custom_css()
@@ -842,18 +829,3 @@ if not display_df.empty:
         st.info("Žádná data pro statistiku.")
 else:
     st.info("Žádná data pro statistiku.")
-
-# --- DEBUG FOOTER (temporary, for Cloud diagnostics) ---
-with st.expander("🔧 Debug info", expanded=bool(st.session_state.get('_last_error'))):
-    if st.session_state.get('_last_error'):
-        st.error("Poslední zachycená chyba:")
-        st.code(st.session_state['_last_error'])
-        if st.button("Smazat chybu"):
-            del st.session_state['_last_error']
-            st.rerun()
-    debug_keys = ['view_mode', 'view_mode_radio', 'navigated_from_comparison',
-                  'schools_select_v2', 'fields_select_v2', 'single_school_select',
-                  'detail_fields_select', '_pending_upload_schools', '_pending_upload_fields',
-                  'pending_nav_school', 'pending_back_nav']
-    debug_state = {k: str(st.session_state.get(k, '---')) for k in debug_keys}
-    st.json(debug_state)
