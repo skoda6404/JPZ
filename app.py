@@ -132,24 +132,32 @@ st.session_state.selected_rounds = selected_rounds
 
 filtered_df = raw_df[raw_df['kolo'].isin(selected_rounds)] if selected_rounds else raw_df.iloc[0:0]
 
-# --- DATA TRANSFORMATION ---
-# --- REMOVED: get_long_format (now in src/data_loader.py) ---
-
+# --- DATA TRANSFORMATION (Lazy Loading) ---
 kkov_map = load_kkov_map()
-long_df_all = get_long_format(filtered_df, school_map, kkov_map)
+from src.data_loader import get_sidebar_options, get_long_format
+
+# Lightweight available options for sidebar
+all_lite_schools, available_grades = get_sidebar_options(filtered_df, school_map)
 
 # --- SIDEBAR: GRADE FILTER ---
 st.sidebar.markdown("---")
-available_grades = sorted(long_df_all['Grade'].unique().tolist()) if not long_df_all.empty else []
 if not available_grades:
     selected_grade = None
 else:
     selected_grade = st.sidebar.radio("Ročník uchazeče", ["Všechny"] + available_grades, key='grade_filter')
 
+# Filter raw WIDE data by grade for more accurate school list
 if selected_grade and selected_grade != "Všechny":
-    long_df = long_df_all[long_df_all['Grade'] == selected_grade]
+    from src.utils import get_grade_level
+    k_cols = [f'ss{j}_kkov' for j in range(1, 6) if f'ss{j}_kkov' in filtered_df.columns]
+    mask = pd.Series(False, index=filtered_df.index)
+    for c in k_cols:
+        mask = mask | (filtered_df[c].map(get_grade_level) == selected_grade)
+    grade_filtered_df = filtered_df[mask]
+    available_schools, _ = get_sidebar_options(grade_filtered_df, school_map)
 else:
-    long_df = long_df_all
+    grade_filtered_df = filtered_df
+    available_schools = all_lite_schools
 
 # --- SIDEBAR: VIEW MODE ---
 st.sidebar.markdown("---")
@@ -167,10 +175,9 @@ view_mode = st.sidebar.radio("Zobrazení", view_modes, key='view_mode_radio')
 st.session_state.view_mode = view_mode
 
 # --- SIDEBAR: SELECTION FILTERS ---
-if not long_df.empty:
+if not grade_filtered_df.empty:
     if view_mode == "Srovnání škol":
-        # 1. School Filter (Multiple)
-        available_schools = sorted(long_df['SchoolName'].unique().tolist())
+        # school list is already pre-filtered by grade above
         if 'selected_schools' not in st.session_state: st.session_state.selected_schools = []
         st.session_state.selected_schools = [s for s in st.session_state.selected_schools if s in available_schools]
         
@@ -182,7 +189,9 @@ if not long_df.empty:
             # Validate fields against the schools that will be selected
             pending_schools = st.session_state.get('schools_select_v2', [])
             if pending_schools:
-                valid_field_options = sorted(long_df[long_df['SchoolName'].isin(pending_schools)]['FieldLabel'].unique().tolist())
+                # We need a small long_df to get field names for validation
+                val_df = get_long_format(grade_filtered_df, school_map, kkov_map, school_names_filter=pending_schools)
+                valid_field_options = sorted(val_df['FieldLabel'].unique().tolist()) if not val_df.empty else []
                 validated_fields = [f for f in st.session_state['_pending_upload_fields'] if f in valid_field_options]
                 st.session_state['fields_select_v2'] = validated_fields
             del st.session_state['_pending_upload_fields']
@@ -194,16 +203,19 @@ if not long_df.empty:
         selected_schools = st.sidebar.multiselect("Vyberte školy", options=available_schools, key='schools_select_v2', placeholder="Zvolte...")
         st.session_state.selected_schools = selected_schools
         
+        # LATE TRANSFORMATION: only process the long format for SELECTED schools
+        long_df = get_long_format(grade_filtered_df, school_map, kkov_map, school_names_filter=selected_schools)
+        
         available_fields = []
-        if selected_schools:
-            school_sub = long_df[long_df['SchoolName'].isin(selected_schools)]
-            available_fields = sorted(school_sub['FieldLabel'].unique().tolist())
+        if not long_df.empty:
+            available_fields = sorted(long_df['FieldLabel'].unique().tolist())
         
         # Validate existing field selection against current options
         if 'fields_select_v2' in st.session_state:
             st.session_state['fields_select_v2'] = [f for f in st.session_state['fields_select_v2'] if f in available_fields]
         
         selected_fields = st.sidebar.multiselect("Vyberte obory", options=available_fields, key='fields_select_v2', placeholder="Zvolte...")
+        st.session_state.selected_fields = selected_fields
         
         # --- CALLBACK FOR LOADING SELECTION ---
         def handle_selection_upload():
@@ -240,13 +252,21 @@ if not long_df.empty:
     else:
         # Detail Mode: Select single school
         st.sidebar.markdown("### 🏛️ Výběr školy")
-        available_schools = sorted(long_df['SchoolName'].unique().tolist())
-        selected_school = st.sidebar.selectbox("Škola pro detail", options=available_schools, index=None, key='single_school_select', placeholder="Zvolte...")
+        # available_schools is already calculated from wide data above
+        
+        if 'single_school_select' not in st.session_state or st.session_state['single_school_select'] not in available_schools:
+             default_idx = None
+        else:
+             default_idx = available_schools.index(st.session_state['single_school_select'])
+
+        selected_school = st.sidebar.selectbox("Škola pro detail", options=available_schools, index=default_idx, key='single_school_select', placeholder="Zvolte...")
         selected_schools = [selected_school] if selected_school else []
         
-        if selected_school:
-            school_sub = long_df[long_df['SchoolName'] == selected_school]
-            available_fields = sorted(school_sub['FieldLabel'].unique().tolist())
+        # LATE TRANSFORMATION for single school
+        long_df = get_long_format(grade_filtered_df, school_map, kkov_map, school_names_filter=selected_schools)
+        
+        if not long_df.empty:
+            available_fields = sorted(long_df['FieldLabel'].unique().tolist())
             
             # Clear stale field selection if it contains values not in current school's fields
             if 'detail_fields_select' in st.session_state:
@@ -259,7 +279,7 @@ if not long_df.empty:
             selected_fields = []
 else:
     st.sidebar.warning("Žádná data pro vybrané parametry.")
-    selected_schools, selected_fields = [], []
+    selected_schools, selected_fields, long_df = [], [], pd.DataFrame()
 
 
 # --- MAIN PAGE CONTENT ---
