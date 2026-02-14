@@ -6,6 +6,7 @@ import sys
 import re
 import json
 import io
+import traceback
 
 from src.data_loader import load_year_data, load_school_map, load_kkov_map, get_long_format, normalize_column_name, load_capacity_data, load_izo_to_redizo_map
 from src.utils import get_grade_level, get_reason_label, clean_pdf_text, clean_col_name, reason_map
@@ -154,8 +155,16 @@ else:
 # --- SIDEBAR: VIEW MODE ---
 st.sidebar.markdown("---")
 view_modes = ["Srovnání škol", "Detailní rozbor školy"]
-v_idx = view_modes.index(st.session_state.view_mode) if st.session_state.view_mode in view_modes else 0
-view_mode = st.sidebar.radio("Zobrazení", view_modes, index=v_idx)
+
+# Use explicit key for stable widget identity across reruns
+if 'view_mode_radio' not in st.session_state:
+    st.session_state['view_mode_radio'] = st.session_state.view_mode
+else:
+    # Sync: if programmatic navigation changed view_mode, update the radio key
+    if st.session_state.view_mode != st.session_state.get('view_mode_radio'):
+        st.session_state['view_mode_radio'] = st.session_state.view_mode
+
+view_mode = st.sidebar.radio("Zobrazení", view_modes, key='view_mode_radio')
 st.session_state.view_mode = view_mode
 
 # --- SIDEBAR: SELECTION FILTERS ---
