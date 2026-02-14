@@ -1,0 +1,93 @@
+
+[     UTC     ] Logs for analyza-jpz.streamlit.app/
+────────────────────────────────────────────────────────────────────────────────────────
+[21:51:55] 🚀 Starting up repository: 'jpz', branch: 'main', main module: 'app.py'
+[21:51:55] 🐙 Cloning repository...
+[21:51:57] 🐙 Cloning into '/mount/src/jpz'...
+
+[21:51:57] 🐙 Cloned repository!
+[21:51:57] 🐙 Pulling code changes from Github...
+[21:51:58] 📦 Processing dependencies...
+
+──────────────────────────────────────── uv ───────────────────────────────────────────
+
+Using uv pip install.
+Using Python 3.13.12 environment at /home/adminuser/venv
+Resolved 49 packages in 485ms
+Prepared 49 packages in 2.02s
+Installed 49 packages in 107ms
+ + altair==6.0.0
+ + attrs==25.4.0
+ + blinker==1.9.0
+ + cachetools==6.2.6
+ + certifi==2026.1.4
+ + cffi==2.0.0
+ + charset-normalizer==3.4.4
+ + click==8.3.1
+ + cryptography==46.0.5
+ + defusedxml==0.7.1
+ + et-xmlfile==2.0.0
+ + fonttools==4.61.1
+ + fpdf2==2.8.5
+ + gitdb==4.0.12
+ + gitpython==3.1.46
+ + idna==3.11
+ + jinja2==3.1.6
+ + jsonschema==4.26.0
+ + jsonschema-specifications==2025.9.1
+ + markupsafe==3.0.3
+ + narwhals==2.16.0
+ + numpy==2.4.2[2026-02-14 21:52:01.359947] 
+ + openpyxl==3.1.5
+ + packaging==26.0
+ + pandas==2.3.3
+ + pdfminer-six==20251230
+ + pdfplumber==0.11.9
+ + pillow==12.1.1
+ + plotly==6.5.2
+ [2026-02-14 21:52:01.360153] + protobuf==6.33.5
+ + pyarrow==23.0.0
+ + pycparser==3.0
+ + pydeck==0.9.1
+ + pypdfium2==5.4.0
+ + python-dateutil==2.9.0.post0
+ + pytz==2025.2
+ + referencing==0.37.0
+ + requests==2.32.5
+ + rpds-py==0.30.0
+ + six==1.17.0
+ [2026-02-14 21:52:01.360574] + smmap==5.0.2
+ + streamlit==1.54.0
+ + tenacity==9.1.4
+ + toml==0.10.2
+ + tornado==6.5.4
+ + typing-extensions==4.15.0
+ + [2026-02-14 21:52:01.360743] tzdata==2025.3
+ + urllib3==2.6.3
+ + watchdog==6.0.0
+Checking if Streamlit is installed
+Found Streamlit version 1.54.0 in the environment
+Installing rich for an improved exception logging
+Using uv pip install.
+Using Python 3.13.12 environment at /home/adminuser/venv
+Resolved 4 packages in 134ms
+Prepared 4 packages in 130ms
+Installed 4 packages in 16ms
+ + markdown-it-py==4.0.0
+ + mdurl[2026-02-14 21:52:03.373987] ==0.1.2
+ + pygments==2.19.2
+ + rich==14.3.2
+
+────────────────────────────────────────────────────────────────────────────────────────
+
+[21:52:04] 🐍 Python dependencies were installed from /mount/src/jpz/requirements.txt using uv.
+Check if streamlit is installed
+Streamlit is already installed
+[21:52:05] 📦 Processed dependencies!
+
+
+
+/mount/src/jpz/src/data_loader.py:46: DtypeWarning: Columns (31) have mixed types. Specify dtype option on import or set low_memory=False.
+  df = pd.read_csv('skoly.csv', encoding='cp1250', sep=';')
+/mount/src/jpz/src/data_loader.py:85: DtypeWarning: Columns (31) have mixed types. Specify dtype option on import or set low_memory=False.
+  df = pd.read_csv('skoly.csv', encoding='cp1250', sep=';')

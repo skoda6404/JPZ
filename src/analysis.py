@@ -9,11 +9,18 @@ def calculate_kpis(school_data, planned_capacity=None):
     total_admitted = len(admitted)
     actual_occupied = total_admitted 
     
-    gave_up_mask = school_data['Reason'].str.contains('vzdal', case=False, na=False)
-    gave_up_total = len(school_data[gave_up_mask])
+    # Use pre-calculated flags if available, otherwise fallback to regex (for backward compatibility)
+    if 'GaveUpSpot' in school_data.columns:
+        gave_up_total = school_data['GaveUpSpot'].sum()
+    else:
+        gave_up_mask = school_data['Reason'].str.contains('vzdal', case=False, na=False)
+        gave_up_total = len(school_data[gave_up_mask])
     
     # Calculate counts and basic indicators first
-    cap_count = len(school_data[school_data['Reason'].str.contains('kapacit', case=False, na=False)])
+    if 'is_capacity_reject' in school_data.columns:
+        cap_count = school_data['is_capacity_reject'].sum()
+    else:
+        cap_count = len(school_data[school_data['Reason'].str.contains('kapacit', case=False, na=False)])
     denom_demand = max(total_admitted, planned_capacity) if planned_capacity and planned_capacity > 0 else total_admitted
     pure_demand_idx = ((total_admitted + cap_count) / denom_demand) if denom_demand > 0 else 0
     
@@ -56,7 +63,18 @@ def calculate_kpis(school_data, planned_capacity=None):
     rejected = school_data[school_data['Prijat'] != 1]
     
     def get_reject_stats_struct(reason_pattern):
-        subset = rejected[rejected['Reason'].str.contains(reason_pattern, case=False, na=False)]
+        col_map = {
+            'kapacit': 'is_capacity_reject',
+            'vyssi_priorit|vyssi prioritu': 'is_lost_priority',
+            'nespln|neprosp|nesplnil|nedosah|kriteri': 'is_failure'
+        }
+        flag_col = col_map.get(reason_pattern)
+        
+        if flag_col and flag_col in rejected.columns:
+            subset = rejected[rejected[flag_col] == True]
+        else:
+            subset = rejected[rejected['Reason'].str.contains(reason_pattern, case=False, na=False)]
+            
         exempt = subset[subset['IsExempt']]
         regular = subset[~subset['IsExempt']]
         

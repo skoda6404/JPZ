@@ -180,7 +180,36 @@ def load_capacity_data(year, round_num=1):
         return pd.DataFrame()
 
 @st.cache_data
-def get_long_format(df_in, _school_map, _kkov_map):
+def get_sidebar_options(df_wide, _school_map):
+    """
+    Lightweight helper to extract available schools and grades directly from raw wide data.
+    Prevents the need to transform ALL data to long format just to populate sidebar filters.
+    """
+    if df_wide.empty: return [], []
+    
+    available_schools = set()
+    available_kkovs = set()
+    
+    # Check all 5 priority columns for schools and fields
+    riz_cols = [f'ss{j}_redizo' for j in range(1, 6) if f'ss{j}_redizo' in df_wide.columns]
+    kkov_cols = [f'ss{j}_kkov' for j in range(1, 6) if f'ss{j}_kkov' in df_wide.columns]
+    
+    for col in riz_cols:
+        riz_vals = pd.to_numeric(df_wide[col], errors='coerce').dropna().unique().astype(int).astype(str)
+        for val in riz_vals:
+            name = _school_map.get(int(val))
+            if name: available_schools.add(name)
+            else: available_schools.add(f"Neznámá škola ({val})")
+            
+    for col in kkov_cols:
+        kkov_vals = df_wide[col].dropna().unique().astype(str)
+        available_kkovs.update(kkov_vals)
+        
+    available_grades = sorted(list(set([get_grade_level(k) for k in available_kkovs])))
+    return sorted(list(available_schools)), available_grades
+
+@st.cache_data
+def get_long_format(df_in, _school_map, _kkov_map, school_names_filter=None):
     if df_in.empty: return pd.DataFrame()
     
     # 1. Prepare wide data with unique Student ID
@@ -188,11 +217,47 @@ def get_long_format(df_in, _school_map, _kkov_map):
     df_wide['Student_UUID'] = range(len(df_wide))
     
     # Cast RED_IZO columns to normalized strings for mapping
-    # Note: _school_map is passed as a dict where keys are ints (RED_IZO/IZO)
     str_school_map = {str(k): v for k, v in _school_map.items()}
     riz_cols = [f'ss{j}_redizo' for j in range(1, 6) if f'ss{j}_redizo' in df_wide.columns]
     for col in riz_cols:
         df_wide[col] = pd.to_numeric(df_wide[col], errors='coerce').fillna(0).astype(int).astype(str)
+
+    # NEW: Pre-calculate Global Admission Map from WIDE data
+    # (This is much faster than doing it on the full long dataframe)
+    success_map_school = {}
+    success_map_detail = {}
+    
+    for i in range(1, 6):
+        r_col, k_col, p_col = f'ss{i}_redizo', f'ss{i}_kkov', f'ss{i}_prijat'
+        # Logic matches get_long_format's field labeling
+        if p_col in df_wide.columns:
+            admitted_mask = (df_wide[p_col] == 1)
+            # We only update if not already found in a higher priority (i < current)
+            # Actually range(1,6) already goes from highest to lowest priority.
+            sub_adm = df_wide[admitted_mask]
+            for idx, row in sub_adm.iterrows():
+                uuid = row['Student_UUID']
+                if uuid not in success_map_school:
+                    # Map REDIZO to Name
+                    riz = str(row[r_col])
+                    school_name = str_school_map.get(riz, f"Neznámá škola ({riz})")
+                    success_map_school[uuid] = school_name
+                    
+                    # Map FieldLabel
+                    kkov = str(row[k_col])
+                    field_name = _kkov_map.get(kkov, kkov)
+                    field_label = f"{field_name} ({kkov})"
+                    success_map_detail[uuid] = f"{school_name} ({field_label})"
+
+    # OPTIONAL: Filter students early based on school names
+    if school_names_filter:
+        # Keep students who have one of target schools in ANY of their 5 priorities
+        mask = pd.Series(False, index=df_wide.index)
+        for col in riz_cols:
+            school_names = df_wide[col].map(str_school_map).fillna("Neznámá škola (" + df_wide[col] + ")")
+            mask = mask | school_names.isin(school_names_filter)
+        df_wide = df_wide[mask]
+        if df_wide.empty: return pd.DataFrame()
 
     normalized_data = []
     cjl_col = 'c_procentni_skor' if 'c_procentni_skor' in df_wide.columns else None
@@ -234,18 +299,17 @@ def get_long_format(df_in, _school_map, _kkov_map):
             # Detect "vzdal se přijetí"
             subset['GaveUpSpot'] = subset['Reason'].str.contains('vzdal', case=False, na=False)
             
+            # Pre-calculate boolean flags for high-performance KPI calculations (avoid regex in loop)
+            subset['is_capacity_reject'] = subset['Reason'].str.contains('kapacit', case=False, na=False)
+            subset['is_lost_priority'] = subset['Reason'].str.contains('vyssi_priorit|vyssi prioritu', case=False, na=False)
+            subset['is_failure'] = subset['Reason'].str.contains('nespln|neprosp|nesplnil|nedosah|kriteri', case=False, na=False)
+            
             normalized_data.append(subset)
     
     if not normalized_data: return pd.DataFrame()
     res = pd.concat(normalized_data, ignore_index=True)
     
-    # 2. POST-PROCESSING: Cross-reference across all priorities for EACH student
-    admitted_rows = res[res['Prijat'] == 1].copy()
-    admitted_rows['CombinedLabel'] = admitted_rows['SchoolName'] + " (" + admitted_rows['FieldLabel'] + ")"
-    
-    success_map_school = admitted_rows.set_index('Student_UUID')['SchoolName'].to_dict()
-    success_map_detail = admitted_rows.set_index('Student_UUID')['CombinedLabel'].to_dict()
-    
+    # 2. POST-PROCESSING: Apply pre-calculated mapping
     res['AcceptedSchoolName'] = res['Student_UUID'].map(success_map_school).fillna("Nepřijat / neznámá")
     res['AcceptedDetail'] = res['Student_UUID'].map(success_map_detail).fillna("Nepřijat / neznámá")
     
