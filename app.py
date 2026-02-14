@@ -32,9 +32,9 @@ if st.session_state.get('pending_back_nav'):
     del st.session_state['pending_back_nav']
     st.session_state['navigated_from_comparison'] = False
     if 'saved_schools_selection' in st.session_state:
-        st.session_state['schools_select_v2'] = st.session_state['saved_schools_selection']
+        st.session_state['_pending_upload_schools'] = st.session_state['saved_schools_selection']
     if 'saved_fields_selection' in st.session_state:
-        st.session_state['fields_select_v2'] = st.session_state['saved_fields_selection']
+        st.session_state['_pending_upload_fields'] = st.session_state['saved_fields_selection']
 
 # --- UI INITIALIZATION ---
 inject_custom_css()
@@ -665,7 +665,7 @@ if view_mode == "Srovnání škol":
         )
         st.plotly_chart(fig_metric, width='stretch')
     else:
-        st.info(f"💡 Metrika **{selected_metric}** není pro vybrané školy relevantní. Pravděpodobně nenaplnily kapacitu, takže u nich nedošlo k omezení výběru a metrika 'hranice' u nich neexistuje.")
+        st.info(f"💡 Metrika **{selected_metric_label}** není pro vybrané školy relevantní. Pravděpodobně nenaplnily kapacitu, takže u nich nedošlo k omezení výběru a metrika 'hranice' u nich neexistuje.")
 
 # Shared Statistics Table
 if not display_df.empty:
