@@ -6,283 +6,43 @@ import sys
 import re
 import json
 import io
-from fpdf import FPDF
 
-# --- CONFIG ---
+from src.data_loader import load_year_data, load_school_map, load_kkov_map, get_long_format, normalize_column_name, load_capacity_data, load_izo_to_redizo_map
+from src.utils import get_grade_level, get_reason_label, clean_pdf_text, clean_col_name, reason_map
+from src.pdf_generator import create_pdf_report
+from src.ui_components import inject_custom_css, render_kpi_cards
+from src.analysis import calculate_kpis, get_decile_data
+
 # --- CONFIG ---
 st.set_page_config(page_title="JPZ", layout="wide")
 
 # --- NAVIGATION LOGIC ---
 if 'view_mode' not in st.session_state:
-    st.session_state['view_mode'] = "Srovnání škol"
+    st.session_state.view_mode = "Srovnání škol"
 
-# Handle proklik from comparison table
+# Apply pending navigation flags safely
 if st.session_state.get('pending_nav_school'):
-    st.session_state['view_mode'] = "Detailní rozbor školy"
-    st.session_state['single_school_select'] = st.session_state.pop('pending_nav_school')
+    st.session_state['single_school_select'] = st.session_state['pending_nav_school']
+    st.session_state.view_mode = "Detailní rozbor školy"
     st.session_state['navigated_from_comparison'] = True
+    del st.session_state['pending_nav_school']
 
-# Handle back button
 if st.session_state.get('pending_back_nav'):
-    st.session_state['view_mode'] = "Srovnání škol"
-    st.session_state['navigated_from_comparison'] = False
+    st.session_state.view_mode = "Srovnání škol"
     del st.session_state['pending_back_nav']
-    # Restore saved selections
+    st.session_state['navigated_from_comparison'] = False
     if 'saved_schools_selection' in st.session_state:
         st.session_state['schools_select_v2'] = st.session_state['saved_schools_selection']
     if 'saved_fields_selection' in st.session_state:
         st.session_state['fields_select_v2'] = st.session_state['saved_fields_selection']
 
-def create_pdf_report(school_name, year, rounds, pivot_df, kpi_data):
-    pdf = FPDF()
-    pdf.add_page()
-    # fpdf2 supports some unicode if we use built-in core fonts, but for Czech TTF is best.
-    # We will use "helvetica" and clean text
-    pdf.set_font("helvetica", "B", 16)
-    pdf.cell(0, 10, clean_pdf_text(f"Detailni report: {school_name}"), ln=True, align="C")
-    pdf.set_font("helvetica", "", 12)
-    pdf.cell(0, 10, clean_pdf_text(f"Rok: {year} | Kola: {', '.join(map(str, rounds))}"), ln=True, align="C")
-    pdf.ln(10)
-    
-    # KPIs
-    pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 10, clean_pdf_text("Klicove metriky skoly:"), ln=True)
-    pdf.set_font("helvetica", "", 11)
-    pdf.cell(60, 8, clean_pdf_text(f"Prihlasek: {kpi_data['total_apps']}"))
-    pdf.cell(60, 8, clean_pdf_text(f"Uspesnost: {kpi_data.get('success_rate', 0):.1f}%"))
-    pdf.cell(60, 8, clean_pdf_text(f"Pretlak: {kpi_data.get('comp_idx', 0):.2f}x"))
-    pdf.ln(10)
-    pdf.cell(60, 8, clean_pdf_text(f"Odmitnuto kapacita: {kpi_data.get('cap_reject_rate', 0):.1f}%"))
-    pdf.cell(60, 8, clean_pdf_text(f"Uspesnost P1: {kpi_data.get('p1_loyalty', 0):.1f}%"))
-    pdf.cell(60, 8, clean_pdf_text(f"Ztracene talenty: {kpi_data.get('talent_gap', 0):+.1f} b."))
-    pdf.ln(15)
-    
-    # Table Header
-    pdf.set_fill_color(240, 240, 240)
-    pdf.set_font("helvetica", "B", 9)
-    cols = ["Obor", "Prihl.", "Prijat", "Min. body", "Elita (10%)"]
-    w = [90, 20, 25, 25, 30]
-    for i, col in enumerate(cols):
-        pdf.cell(w[i], 10, clean_pdf_text(col), 1, 0, "C", True)
-    pdf.ln()
-    
-    # Table Data
-    pdf.set_font("helvetica", "", 8)
-    for _, row in pivot_df.iterrows():
-        field = clean_pdf_text(str(row['Obor']))[:55]
-        pdf.cell(w[0], 8, field, 1)
-        pdf.cell(w[1], 8, str(row.get('Přihlášek', row.get('Celkem přihlášek', '-'))), 1, 0, "C")
-        adm_val = str(row.get('PŘIJAT', '-')).replace('\n', ' ')
-        pdf.cell(w[2], 8, clean_pdf_text(adm_val), 1, 0, "C")
-        min_b = str(row.get('Poslední\npřijatý', row.get('Poslední přijatý (body)', '-')))
-        pdf.cell(w[3], 8, min_b, 1, 0, "C")
-        elite = str(row.get('Elitní\nprůměr', row.get('Elitní průměr (10%)', '-')))
-        pdf.cell(w[4], 8, elite, 1, 0, "C")
-        pdf.ln()
-    return bytes(pdf.output())
-
-
-# Custom CSS for a professional, "Excel-inspired" compact look
-st.markdown("""
-    <style>
-    .main .block-container {
-        padding-top: 1rem;
-        padding-bottom: 0.5rem;
-        padding-left: 1.5rem;
-        padding-right: 1.5rem;
-    }
-    div[data-testid="stMetric"] {
-        background-color: #f8f9fa;
-        padding: 5px 15px;
-        border-radius: 4px;
-        border: 1px solid #dee2e6;
-    }
-    section[data-testid="stSidebar"] > div {
-        padding-top: 1.5rem;
-    }
-    .stTable {
-        font-size: 0.85rem;
-    }
-    /* Compact headers */
-    h1 { margin-bottom: 0.5rem !important; font-size: 1.8rem !important; }
-    h3 { margin-top: 1rem !important; margin-bottom: 0.5rem !important; font-size: 1.2rem !important; }
-    
-    /* Force wrapping in dataframes and headers */
-    div[data-testid="stDataFrame"] thead th {
-        white-space: pre-wrap !important;
-        vertical-align: bottom !important;
-    }
-    div[data-testid="stDataFrame"] td {
-        white-space: pre-wrap !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# --- UI INITIALIZATION ---
+inject_custom_css()
 
 # --- GLOBAL CONSTANTS ---
-reason_map = {
-    "prijat_na_vyssi_prioritu": "Přijat na vyšší prioritu",
-    "neprijat_pro_nedostatecnou_kapacitu": "Kapacita",
-    "pro_nedostacujici_kapacitu": "Kapacita",
-    "neprijat_pro_nesplneni_podminek": "Nesplnil podmínky",
-    "pro_nesplneni_podminek": "Nesplnil podmínky",
-    "vzdal_se_u_nas": "Vzdal se (u nás)",
-    "vzdal_se": "Vzdal se (u nás)",
-    "Neuvedeno": "Neuvedeno"
-}
+# reason_map is now handled within get_reason_label in src.utils
 
-def get_reason_label(reason):
-    return reason_map.get(reason, reason)
-
-def clean_pdf_text(text):
-    """Simple ASCII transliteration for PDF fonts that don't support Unicode"""
-    if not isinstance(text, str): return str(text)
-    trans = {
-        'á': 'a', 'č': 'c', 'ď': 'd', 'é': 'e', 'ě': 'e', 'í': 'i', 'ň': 'n', 'ó': 'o', 'ř': 'r', 'š': 's', 'ť': 't', 'ú': 'u', 'ů': 'u', 'ý': 'y', 'ž': 'z',
-        'Á': 'A', 'Č': 'C', 'Ď': 'D', 'É': 'E', 'Ě': 'E', 'Í': 'I', 'Ň': 'N', 'Ó': 'O', 'Ř': 'R', 'Š': 'S', 'Ť': 'T', 'Ú': 'U', 'Ů': 'U', 'Ý': 'Y', 'Ž': 'Z'
-    }
-    for k, v in trans.items():
-        text = text.replace(k, v)
-    return text
-
-def get_grade_level(kkov):
-    """Identifies grade based on KKOV code (8-year, 6-year, 4-year)"""
-    k = str(kkov)
-    if k.endswith('/81'): return "5. (8leté)"
-    if k.endswith('/61'): return "7. (6leté)"
-    return "9. (4leté/obory)"
-
-# --- DATA NORMALIZATION HELPERS ---
-def clean_col_name(col):
-    """Strip non-ascii characters and normalize case"""
-    s = "".join([c if ord(c) < 128 else "" for c in str(col)])
-    return s.strip().lower()
-
-def normalize_column_name(col):
-    """Normalize 2024 mangled columns to 2025 standard names with robust string matching"""
-    original = str(col)
-    c = clean_col_name(col)
-    
-    # 1. Subject Scores
-    if ('jl' in c and 'procent' in c) or ('jl' in c and 'lep' in c):
-        return 'c_procentni_skor'
-    if ('ma' in c and 'procent' in c) or ('ma' in c and 'lep' in c):
-        return 'm_procentni_skor'
-    
-    # 2. Priority Columns (ss1..ss5)
-    match = re.search(r's(\d)', c) or re.search(r's(\d)', c) # Handle cases where regex might fail due to mangling
-    # Fallback to simple indices if digit is near 's'
-    if not match:
-        for i in range(1, 6):
-            if f's{i}' in c or f's{i}' in c: 
-                idx = str(i)
-                break
-        else: idx = None
-    else: idx = match.group(1)
-
-    if idx:
-        new_prefix = f'ss{idx}_'
-        if 'izo' in c or 'redizo' in c: return f'{new_prefix}redizo'
-        if 'kkov' in c or 'obor' in c or 'kd' in c: return f'{new_prefix}kkov'
-        if 'prijat' in c or 'pijat' in c: return f'{new_prefix}prijat'
-        if 'duvod' in c: return f'{new_prefix}duvod_neprijeti'
-    
-    if 'kolo' in c: return 'kolo'
-    if 'rok' in c: return 'rok'
-    
-    return original
-
-@st.cache_data
-def load_school_map():
-    """Loads the school mapping (both RED_IZO and IZO -> Names)"""
-    try:
-        df = pd.read_csv('skoly.csv', encoding='cp1250', sep=';')
-    except:
-        df = pd.read_csv('skoly.csv', encoding='utf-8', sep=';')
-    
-    mapping = {}
-    df['is_school'] = df['Nazev'].fillna('').astype(str).str.contains('škola|Gymnázium|Lyceum', case=False)
-    # Sort: put actual schools at the top so we pick their name first
-    df = df.sort_values(by=['is_school'], ascending=False)
-
-    for _, row in df.iterrows():
-        try:
-            riz = int(float(row['RED_IZO']))
-            iz = int(float(row['IZO']))
-            
-            short_name = str(row['Zkraceny_nazev']).strip()
-            name_vessel = str(row['Nazev']).strip()
-            full_name = str(row['Plny_nazev']).strip()
-            
-            final_name = full_name
-            if not final_name or final_name.lower() == 'nan':
-                 final_name = name_vessel
-
-            misto = str(row['Misto']).strip() if 'Misto' in row and pd.notna(row['Misto']) else ""
-            if misto and misto.lower() not in final_name.lower():
-                final_name = f"{final_name} ({misto})"
-            
-            # Add to map using both RED_IZO and IZO keys
-            if riz not in mapping: mapping[riz] = final_name
-            if iz not in mapping: mapping[iz] = final_name
-        except:
-            continue
-    return mapping
-
-@st.cache_data
-def load_kkov_map():
-    """Loads KKOV code to Name mapping from JSON"""
-    if os.path.exists('kkov_map.json'):
-        with open('kkov_map.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {}
-
-@st.cache_data
-def load_year_data(year):
-    """Loads and normalizes data for a specific year"""
-    files = [f for f in os.listdir('.') if f.startswith(f'PZ{year}') and f.endswith('.xlsx')]
-    if not files: return pd.DataFrame()
-        
-    dfs = []
-    for f in files:
-        try:
-            df = pd.read_excel(f)
-            # Normalize column names
-            df.columns = [normalize_column_name(c) for c in df.columns]
-            
-            # Deduplicate columns
-            unique_cols = []
-            seen = set()
-            for c in df.columns:
-                if c not in seen:
-                    unique_cols.append(c)
-                    seen.add(c)
-                else:
-                    unique_cols.append(f"{c}_dup_{len(seen)}")
-            df.columns = unique_cols
-
-            # Numeric conversion
-            num_cols = [c for c in df.columns if 'redizo' in c or c == 'kolo' or 'procentni_skor' in c]
-            for col in num_cols:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # Normalize 'Prijat' columns - in 2024 they might be bool, in 2025 numeric
-            prijat_cols = [c for c in df.columns if 'prijat' in c]
-            for col in prijat_cols:
-                # Map True/False to 1/0, or keep 1/2 from 2025
-                # We normalize so that 1 ALWAYS means accepted.
-                # In 2025 Excel, 1 was accepted. In 2024 bool, True is accepted.
-                if df[col].dtype == bool:
-                    df[col] = df[col].astype(int)
-                else:
-                    # If it's 1/2 or something Else, we assume 1 is success.
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-            
-            dfs.append(df)
-        except Exception as e:
-            st.error(f"Chyba při načítání {f}: {e}")
-            
-    if not dfs: return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True)
+# --- REMOVED: Load Functions (now in src/data_loader.py) ---
 
 # --- SESSION STATE INITIALIZATION ---
 if 'selected_year' not in st.session_state:
@@ -302,8 +62,47 @@ y_idx = available_years.index(st.session_state.selected_year) if st.session_stat
 selected_year = st.sidebar.radio("Rok konání", available_years, index=y_idx, key='year_select', horizontal=True)
 st.session_state.selected_year = selected_year
 
+# --- DATA LOADING ---
 school_map = load_school_map()
+izo_to_redizo = load_izo_to_redizo_map()
 raw_df = load_year_data(selected_year)
+# Load capacities for all possible rounds (currently up to 2)
+capacity_dfs = {r: load_capacity_data(selected_year, r) for r in [1, 2]}
+
+def get_planned_capacity(riz, kkov, cap_dfs, selected_rounds):
+    """
+    Finds planned capacity for a specific school and field based on baseline logic:
+    - Translates facility IZO to institution REDIZO using izo_to_redizo mapping.
+    - If 1. kolo is selected (even with other rounds), use R1 as baseline.
+    - If ONLY 2. kolo (or others) is selected, use that specific round's capacity.
+    """
+    if not selected_rounds or not cap_dfs: return None
+    kkov_str = str(kkov).strip()
+    
+    # Translate facility IZO to institution REDIZO
+    riz_str = str(riz)
+    redizo = izo_to_redizo.get(riz_str, riz_str)
+    
+    # Priority: if R1 is in selected_rounds, use R1 capacity
+    target_round = 1 if 1 in selected_rounds else selected_rounds[0]
+    
+    df = cap_dfs.get(target_round)
+    if df is None or df.empty: return None
+
+    # Try to find a match using REDIZO column (capacity files use institution-level REDIZO)
+    if 'REDIZO' not in df.columns: return None
+    
+    match = df[(df['REDIZO'] == redizo) & (df['KKOV'] == kkov_str)]
+    if not match.empty:
+        return int(match['KAPACITA'].sum())
+    
+    # Fallback: try with original riz_str in case it's already a REDIZO
+    if redizo != riz_str:
+        match = df[(df['REDIZO'] == riz_str) & (df['KKOV'] == kkov_str)]
+        if not match.empty:
+            return int(match['KAPACITA'].sum())
+    
+    return None
 
 if raw_df.empty:
     st.warning(f"Data pro rok {selected_year} nejsou k dispozici.")
@@ -330,74 +129,7 @@ st.session_state.selected_rounds = selected_rounds
 filtered_df = raw_df[raw_df['kolo'].isin(selected_rounds)] if selected_rounds else raw_df.iloc[0:0]
 
 # --- DATA TRANSFORMATION ---
-@st.cache_data
-def get_long_format(df_in, _school_map, _kkov_map):
-    if df_in.empty: return pd.DataFrame()
-    
-    # 1. Prepare wide data with unique Student ID
-    df_wide = df_in.copy()
-    df_wide['Student_UUID'] = range(len(df_wide))
-    
-    # Cast RED_IZO columns to normalized strings for mapping
-    str_school_map = {str(k): v for k, v in _school_map.items()}
-    riz_cols = [f'ss{j}_redizo' for j in range(1, 6) if f'ss{j}_redizo' in df_wide.columns]
-    for col in riz_cols:
-        df_wide[col] = pd.to_numeric(df_wide[col], errors='coerce').fillna(0).astype(int).astype(str)
-
-    normalized_data = []
-    cjl_col = 'c_procentni_skor' if 'c_procentni_skor' in df_wide.columns else None
-    mat_col = 'm_procentni_skor' if 'm_procentni_skor' in df_wide.columns else None
-    
-    for i in range(1, 6):
-        r_col, k_col, p_col = f'ss{i}_redizo', f'ss{i}_kkov', f'ss{i}_prijat'
-        d_col = f'ss{i}_duvod_neprijeti'
-        
-        if r_col in df_wide.columns and k_col in df_wide.columns:
-            subset = df_wide[['Student_UUID', r_col, k_col, p_col, 'kolo']].copy()
-            subset.rename(columns={r_col: 'RED_IZO', k_col: 'KKOV', p_col: 'Prijat'}, inplace=True)
-            subset['Priority'] = i
-            
-            # School Name for current row
-            subset['SchoolName'] = subset['RED_IZO'].map(str_school_map).fillna("Neznámá škola (" + subset['RED_IZO'] + ")")
-
-            # Clean Reason
-            if d_col in df_wide.columns:
-                subset['Reason'] = df_wide[d_col].fillna("Neuvedeno").astype(str).str.strip()
-            else:
-                subset['Reason'] = "Neuvedeno"
-
-            # Point Calcs and Exemption identification
-            cjl_raw = df_wide[cjl_col] if cjl_col else pd.Series(None, index=subset.index)
-            mat_raw = df_wide[mat_col] if mat_col else pd.Series(None, index=subset.index)
-            
-            cjl_num = pd.to_numeric(cjl_raw, errors='coerce')
-            mat_num = pd.to_numeric(mat_raw, errors='coerce')
-            
-            subset['IsExempt'] = cjl_num.isna() & mat_num.notna()
-            subset['TotalPoints'] = ((cjl_num.fillna(0) * 0.5) + (mat_num.fillna(0) * 0.5)).clip(0, 100)
-            
-            # Map KKOV to Name
-            subset['Grade'] = subset['KKOV'].map(get_grade_level)
-            subset['FieldName'] = subset['KKOV'].map(_kkov_map).fillna(subset['KKOV'])
-            subset['FieldLabel'] = subset['FieldName'] + " (" + subset['KKOV'] + ")"
-            
-            normalized_data.append(subset)
-    
-    if not normalized_data: return pd.DataFrame()
-    res = pd.concat(normalized_data, ignore_index=True)
-    
-    # 2. POST-PROCESSING: Cross-reference across all priorities for EACH student
-    # Find rows where Prijat == 1 and map their info back to all rows of same student
-    admitted_rows = res[res['Prijat'] == 1].copy()
-    admitted_rows['CombinedLabel'] = admitted_rows['SchoolName'] + " (" + admitted_rows['FieldLabel'] + ")"
-    
-    success_map_school = admitted_rows.set_index('Student_UUID')['SchoolName'].to_dict()
-    success_map_detail = admitted_rows.set_index('Student_UUID')['CombinedLabel'].to_dict()
-    
-    res['AcceptedSchoolName'] = res['Student_UUID'].map(success_map_school).fillna("Nepřijat / neznámá")
-    res['AcceptedDetail'] = res['Student_UUID'].map(success_map_detail).fillna("Nepřijat / neznámá")
-    
-    return res
+# --- REMOVED: get_long_format (now in src/data_loader.py) ---
 
 kkov_map = load_kkov_map()
 long_df_all = get_long_format(filtered_df, school_map, kkov_map)
@@ -423,8 +155,6 @@ view_mode = st.sidebar.radio("Zobrazení", view_modes, index=v_idx)
 st.session_state.view_mode = view_mode
 
 # --- SIDEBAR: SELECTION FILTERS ---
-st.sidebar.markdown("---")
-
 if not long_df.empty:
     if view_mode == "Srovnání škol":
         # 1. School Filter (Multiple)
@@ -432,26 +162,59 @@ if not long_df.empty:
         if 'selected_schools' not in st.session_state: st.session_state.selected_schools = []
         st.session_state.selected_schools = [s for s in st.session_state.selected_schools if s in available_schools]
         
-        selected_schools = st.sidebar.multiselect("Výběr škol", options=available_schools, key='schools_select_v2', placeholder="Vyberte...")
+        selected_schools = st.sidebar.multiselect("Vyberte školy", options=available_schools, key='schools_select_v2', placeholder="Zvolte...")
         st.session_state.selected_schools = selected_schools
         
+        available_fields = []
         if selected_schools:
             school_sub = long_df[long_df['SchoolName'].isin(selected_schools)]
             available_fields = sorted(school_sub['FieldLabel'].unique().tolist())
-            selected_fields = st.sidebar.multiselect("Výběr oborů", options=available_fields, key='fields_select_v2', placeholder="Vyberte...")
-        else:
-            selected_fields = []
+        selected_fields = st.sidebar.multiselect("Vyberte obory", options=available_fields, key='fields_select_v2', placeholder="Zvolte...")
+        
+        # --- CALLBACK FOR LOADING SELECTION ---
+        def handle_selection_upload():
+            if st.session_state.selection_upload_file is not None:
+                try:
+                    content = st.session_state.selection_upload_file.read().decode('utf-8-sig')
+                    fav_data = json.loads(content)
+                    new_schools = [s.strip() for s in fav_data.get('schools', [])]
+                    new_fields = [f.strip() for f in fav_data.get('fields', [])]
+                    
+                    # Filter only those that exist in current dataset
+                    valid_schools = [s for s in new_schools if s in available_schools]
+                    
+                    st.session_state['schools_select_v2'] = valid_schools
+                    st.session_state['fields_select_v2'] = new_fields
+                except Exception as e:
+                    st.session_state['upload_error'] = f"Chyba při nahrávání: {e}"
+
+        # Simple File-based Export/Import
+        st.sidebar.markdown(" ")
+        with st.sidebar.expander("💾 Uložit / Načíst výběr"):
+            if selected_schools:
+                from src.storage import get_export_json
+                export_data = get_export_json("vyber", selected_schools, selected_fields)
+                st.download_button("📩 Uložit výběr do souboru", data=export_data, file_name="prijimacky_vyber.json", mime="application/json", use_container_width=True)
+            
+            st.markdown("---")
+            st.markdown("📂 **Nahrát výběr ze souboru**")
+            st.file_uploader("Vyberte JSON soubor s uloženým výběrem", type=['json'], label_visibility="collapsed", on_change=handle_selection_upload, key='selection_upload_file')
+            
+            if 'upload_error' in st.session_state:
+                st.error(st.session_state.upload_error)
+                del st.session_state['upload_error']
+
     else:
         # Detail Mode: Select single school
+        st.sidebar.markdown("### 🏛️ Výběr školy")
         available_schools = sorted(long_df['SchoolName'].unique().tolist())
-        selected_school = st.sidebar.selectbox("Vyberte školu pro detail", options=available_schools, index=None, key='single_school_select', placeholder="Zvolte školu...")
+        selected_school = st.sidebar.selectbox("Škola pro detail", options=available_schools, index=None, key='single_school_select', placeholder="Zvolte...")
         selected_schools = [selected_school] if selected_school else []
         
-        # In detail mode, we usually show all fields for that school
         if selected_school:
             school_sub = long_df[long_df['SchoolName'] == selected_school]
             available_fields = sorted(school_sub['FieldLabel'].unique().tolist())
-            selected_fields = available_fields # Show all fields in detail by default
+            selected_fields = st.sidebar.multiselect("Vyberte obory", options=available_fields, default=available_fields, key='detail_fields_select', placeholder="Zvolte...")
         else:
             selected_fields = []
 else:
@@ -469,76 +232,71 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
             st.session_state['pending_back_nav'] = True
             st.rerun()
 
-    st.title(f"🏛️ Detail školy: {school_name}")
+    school_data = long_df[(long_df['SchoolName'] == school_name) & (long_df['FieldLabel'].isin(selected_fields))]
     
-    school_data = long_df[long_df['SchoolName'] == school_name]
+    if school_data.empty:
+        st.warning("Zvolte alespoň jeden obor v bočním panelu.")
+        st.stop()
     
-    # --- NEW: Points Comparison Chart at the top ---
-    st.markdown("#### 📊 Rozložení bodů přijatých uchazečů")
+    # --- Points Comparison Chart ---
+    col_hdr, col_tgl = st.columns([4, 1])
+    with col_hdr:
+        st.markdown("#### 📊 Rozložení bodů přijatých uchazečů")
+    with col_tgl:
+        st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
+        use_deciles = st.checkbox("Decilové zobrazení", key="decile_detail", help="Normalizuje vodorovnou osu na 0-100 % kapacity oboru.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     admitted_only_all = long_df[long_df['Prijat'] == 1].copy()
     if not admitted_only_all.empty:
         import plotly.graph_objects as go
         fig_pts = go.Figure()
         
-        # We want to show our school's fields and possibly others if they were in comparison?
-        # User asked to "insert graph from comparison". Let's show all fields for CURRENT school
-        # but in the same style as comparison.
-        
-        groups_pts = sorted(school_data[school_data['Prijat'] == 1].groupby(['FieldLabel']), key=lambda x: x[0])
+        plot_df = get_decile_data(school_data[school_data['Prijat'] == 1]) if use_deciles else school_data[school_data['Prijat'] == 1].copy()
+        if not use_deciles:
+            # Add Rank manually if not using get_decile_data which adds Percentile
+            res_list = []
+            for name, group in plot_df.groupby(['FieldLabel']):
+                group_s = group.sort_values('TotalPoints', ascending=False).reset_index(drop=True)
+                group_s['Rank'] = group_s.index + 1
+                res_list.append(group_s)
+            plot_df = pd.concat(res_list) if res_list else plot_df
+
+        groups_pts = sorted(plot_df.groupby(['FieldLabel']), key=lambda x: x[0])
         colors_pts = px.colors.qualitative.Plotly
         
         for i, (field, group) in enumerate(groups_pts):
             color = colors_pts[i % len(colors_pts)]
             label = f"{field}"
-            group_s = group.sort_values('TotalPoints', ascending=False).reset_index(drop=True)
-            group_s['Rank'] = group_s.index + 1
-            regular = group_s[~group_s['IsExempt']]; exempt = group_s[group_s['IsExempt']]
+            x_col = 'Percentile' if use_deciles else 'Rank'
+            regular = group[~group['IsExempt']]; exempt = group[group['IsExempt']]
             if not regular.empty:
-                fig_pts.add_trace(go.Scatter(x=regular['Rank'], y=regular['TotalPoints'], mode='lines+markers', name=label, line=dict(color=color), marker=dict(color=color)))
+                fig_pts.add_trace(go.Scatter(x=regular[x_col], y=regular['TotalPoints'], mode='lines+markers', name=label, line=dict(color=color), marker=dict(color=color)))
             if not exempt.empty:
-                fig_pts.add_trace(go.Scatter(x=exempt['Rank'], y=exempt['TotalPoints'], mode='markers', name=f"{label} (Odp. CJL)", marker=dict(color=color, symbol='x-thin', size=10), showlegend=False))
+                fig_pts.add_trace(go.Scatter(x=exempt[x_col], y=exempt['TotalPoints'], mode='markers', name=f"{label} (Odp. CJL)", marker=dict(color=color, symbol='x-thin', size=10), showlegend=False))
         
-        fig_pts.update_layout(xaxis_title="Pořadí", yaxis_title="Body", template="plotly_white", height=400, margin=dict(l=40, r=40, t=20, b=40), legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="left", x=0))
+        fig_pts.update_layout(xaxis_title="Procenta (%)" if use_deciles else "Pořadí", yaxis_title="Body", template="plotly_white", height=400, margin=dict(l=40, r=40, t=20, b=40), legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="left", x=0))
         st.plotly_chart(fig_pts, use_container_width=True)
     
     st.markdown("---")
     
     # 1. KPI Cards
-    total_apps = len(school_data)
-    total_admitted = len(school_data[school_data['Prijat'] == 1])
-    success_rate = (total_admitted / total_apps * 100) if total_apps > 0 else 0
-    competition_index = (total_apps / total_admitted) if total_admitted > 0 else 0
+    # Calculate total capacity for all fields in the detail view
+    total_planned = 0
+    riz_detail = str(school_data['RED_IZO'].iloc[0]) if not school_data.empty else None
+    if riz_detail:
+        for kkov in school_data['KKOV'].unique():
+            kkov_s = str(kkov)
+            cap = get_planned_capacity(riz_detail, kkov_s, capacity_dfs, selected_rounds)
+            if cap: total_planned += cap
+            
+    kpi_res = calculate_kpis(school_data, planned_capacity=total_planned if total_planned > 0 else None)
     
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Celkem přihlášek", total_apps)
-    m2.metric("Úspěšnost přijetí", f"{success_rate:.1f}%")
-    m3.metric("Index přetlaku", f"{competition_index:.2f}x")
-    
-    # New Advanced KPIs
-    # Robust check for reason - searching for 'kapacit' covers both common variants
-    cap_rejects = len(school_data[school_data['Reason'].str.contains('kapacit', case=False, na=False)])
-    cap_reject_rate = (cap_rejects / total_apps * 100) if total_apps > 0 else 0
-    
-    p1_data = school_data[school_data['Priority'] == 1]
-    p1_loyalty = (len(p1_data[p1_data['Prijat'] == 1]) / len(p1_data) * 100) if not p1_data.empty else 0
-    
-    avg_admitted = school_data[school_data['Prijat'] == 1]['TotalPoints'].mean()
-    # Robust check for 'lost' students (higher priority elsewhere)
-    lost_talents = school_data[school_data['Reason'].str.contains('vyssi_priorit|vyssi prioritu', case=False, na=False)]
-    avg_lost = lost_talents['TotalPoints'].mean()
-    talent_gap = (avg_lost - avg_admitted) if not pd.isna(avg_lost) and not pd.isna(avg_admitted) else 0
+    # Unfilled school warning (A.1.2) - Status bar above Main Results
+    if kpi_res['fullness_rate'] < 100:
+        st.warning("⚠️ Škola ve vámi vybraném období nenaplnila kapacitu.")
 
-    # Passed count: everyone who wasn't rejected for not meeting conditions
-    not_passed = school_data['Reason'].str.contains('nesplneni_podminek', case=False, na=False)
-    passed_count = len(school_data[~not_passed])
-    pure_demand_idx = (passed_count / total_admitted) if total_admitted > 0 else 0
-
-    m4, m5, m6 = st.columns(3)
-    m4.metric("Odmítnuto (kapacita)", f"{cap_reject_rate:.1f}%", help="Procento uchazečů, kteří nebyli přijati čistě z důvodu naplněné kapacity.")
-    m5.metric("Úspěšnost 1. priority", f"{p1_loyalty:.1f}%", help="Jaká byla šance na přijetí pro ty, kteří dali tuto školu na 1. místo.")
-    m6.metric("Kvalita ztracených", f"{talent_gap:+.1f} b.", help="O kolik bodů měli v průměru více ti, kteří byli přijati na školu s vyšší prioritou, než ti, které jste přijali vy.")
-    
-    st.info(f"ℹ️ **Index čistého převisu:** {pure_demand_idx:.2f} vhodných uchazečů na 1 volné místo.")
+    render_kpi_cards(kpi_res)
     
     st.markdown("---")
     
@@ -559,10 +317,13 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
             total_per_obor = df_prio.groupby('Obor')['Počet'].transform('sum')
             df_prio['Procento'] = (df_prio['Počet'] / total_per_obor * 100).round(0)
             
+            # Combine percentage and count for labels
+            df_prio['Label'] = df_prio.apply(lambda r: f"{r['Procento']:.0f}% ({r['Počet']} přihlášek)" if r['Počet'] > 0 else "", axis=1)
+            
             fig_prio = px.bar(df_prio, x="Obor", y="Procento", color="Priorita", 
-                              height=400, text="Procento",
+                              height=400, text="Label",
                               barmode="stack", color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig_prio.update_traces(texttemplate='%{text}%', textposition='inside')
+            fig_prio.update_traces(textposition='inside', textfont_size=12)
             fig_prio.update_layout(yaxis_title="Procento (%)", showlegend=False)
             st.plotly_chart(fig_prio, use_container_width=True)
 
@@ -581,10 +342,13 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
             total_per_obor_adm = df_prio_adm.groupby('Obor')['Počet'].transform('sum')
             df_prio_adm['Procento'] = (df_prio_adm['Počet'] / total_per_obor_adm * 100).round(0)
             
+            # Combine percentage and count for labels
+            df_prio_adm['Label'] = df_prio_adm.apply(lambda r: f"{r['Procento']:.0f}% ({r['Počet']} přijatých)" if r['Počet'] > 0 else "", axis=1)
+            
             fig_prio_adm = px.bar(df_prio_adm, x="Obor", y="Procento", color="Priorita", 
-                                  height=400, text="Procento",
+                                  height=400, text="Label",
                                   barmode="stack", color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig_prio_adm.update_traces(texttemplate='%{text}%', textposition='inside')
+            fig_prio_adm.update_traces(textposition='inside', textfont_size=12)
             fig_prio_adm.update_layout(yaxis_title="Procento (%)")
             st.plotly_chart(fig_prio_adm, use_container_width=True)
 
@@ -655,11 +419,12 @@ if view_mode == "Detailní rozbor školy" and selected_schools:
     plot_redistribution(cat_c, "C) Nepřijati pro nesplnění podmínek (neprospěli)", "Magma", global_max)
 
     # Talent Comparison Chart (Tiny horizontal bar)
-    if not pd.isna(avg_admitted) and not pd.isna(avg_lost):
+    # Talent Comparison Chart (Tiny horizontal bar)
+    if not pd.isna(kpi_res['avg_admitted']) and not pd.isna(kpi_res['lost_avg']):
         st.markdown("---")
         talent_df = pd.DataFrame([
-            {"Skupina": "Naši přijatí", "Body": avg_admitted, "Barva": "green"},
-            {"Skupina": "Utekli (vyšší priorita)", "Body": avg_lost, "Barva": "red"}
+            {"Skupina": "Naši přijatí", "Body": kpi_res['avg_admitted'], "Barva": "green"},
+            {"Skupina": "Utekli (vyšší priorita)", "Body": kpi_res['lost_avg'], "Barva": "red"}
         ])
         fig_talent = px.bar(talent_df, x="Body", y="Skupina", orientation='h',
                             title="Srovnání kvality: Naši přijatí vs. Ztracení (vyšší priorita)",
@@ -686,26 +451,210 @@ else:
 admitted_only = display_df[display_df['Prijat'] == 1].copy()
 
 if view_mode == "Srovnání škol":
-    st.markdown("### 📊 Výsledky přijímacího řízení")
+    # --- Color Mapping ---
+    # Create a stable color map for all selected school-field combinations
+    all_groups = sorted(display_df.groupby(['SchoolName', 'FieldLabel']).groups.keys())
+    color_palette = px.colors.qualitative.Plotly
+    # We use a consistent label format for mapping
+    color_map = {f"{s} ({f})": color_palette[i % len(color_palette)] for i, (s, f) in enumerate(all_groups)}
+
+    # --- Main Chart ---
+    col_hdr, col_tgl = st.columns([4, 1])
+    with col_hdr:
+        st.markdown("### 📊 Výsledky přijímacího řízení")
+    with col_tgl:
+        st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
+        use_deciles_comp = st.checkbox("Decilové zobrazení", key="decile_comp", help="Normalizuje vodorovnou osu na 0-100 % kapacity oboru.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     if admitted_only.empty:
         st.warning("Žádná data o PŘIJATÝCH uchazečích.")
     else:
         import plotly.graph_objects as go
         fig = go.Figure()
-        groups = sorted(admitted_only.groupby(['SchoolName', 'FieldLabel']), key=lambda x: x[0])
-        colors = px.colors.qualitative.Plotly
-        for i, ((school, field), group) in enumerate(groups):
-            color = colors[i % len(colors)]
-            label = f"{school} [{field}]"
-            group_s = group.sort_values('TotalPoints', ascending=False).reset_index(drop=True)
-            group_s['Rank'] = group_s.index + 1
-            regular = group_s[~group_s['IsExempt']]; exempt = group_s[group_s['IsExempt']]
+        
+        plot_df_comp = get_decile_data(admitted_only) if use_deciles_comp else admitted_only.copy()
+        if not use_deciles_comp:
+            res_list = []
+            for name, group in plot_df_comp.groupby(['SchoolName', 'FieldLabel']):
+                group_s = group.sort_values('TotalPoints', ascending=False).reset_index(drop=True)
+                group_s['Rank'] = group_s.index + 1
+                res_list.append(group_s)
+            plot_df_comp = pd.concat(res_list) if res_list else plot_df_comp
+
+        groups = sorted(plot_df_comp.groupby(['SchoolName', 'FieldLabel']), key=lambda x: x[0])
+        for (school, field), group in groups:
+            label = f"{school} ({field})"
+            color = color_map.get(label, "#333")
+            x_col = 'Percentile' if use_deciles_comp else 'Rank'
+            regular = group[~group['IsExempt']]; exempt = group[group['IsExempt']]
             if not regular.empty:
-                fig.add_trace(go.Scatter(x=regular['Rank'], y=regular['TotalPoints'], mode='lines+markers', name=label, legendgroup=label, line=dict(color=color), marker=dict(color=color)))
+                fig.add_trace(go.Scatter(x=regular[x_col], y=regular['TotalPoints'], name=label, legendgroup=label, mode='lines+markers', line=dict(color=color), marker=dict(color=color)))
             if not exempt.empty:
-                fig.add_trace(go.Scatter(x=exempt['Rank'], y=exempt['TotalPoints'], mode='markers', name=f"{label} (Odp. CJL)", legendgroup=label, marker=dict(color=color, symbol='x-thin', size=10, line=dict(color=color, width=2)), showlegend=False, hovertemplate="<b>%{text}</b><br>Rank: %{x}<br>Points: %{y}<extra></extra>", text=[f"{label} (Odp. CJL)"] * len(exempt)))
-        fig.update_layout(xaxis_title="Pořadí", yaxis_title="Body", template="plotly_white", height=700, margin=dict(l=40, r=40, t=20, b=40), legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="left", x=0))
+                fig.add_trace(go.Scatter(x=exempt[x_col], y=exempt['TotalPoints'], mode='markers', name=f"{label} (Odp. CJL)", legendgroup=label, marker=dict(color=color, symbol='x-thin', size=10, line=dict(color=color, width=2)), showlegend=False, hovertemplate="<b>%{text}</b><br>"+x_col+": %{x}<br>Points: %{y}<extra></extra>", text=[f"{label} (Odp. CJL)"] * len(exempt)))
+        fig.update_layout(xaxis_title="Procenta (%)" if use_deciles_comp else "Pořadí", yaxis_title="Body", template="plotly_white", height=700, margin=dict(l=40, r=40, t=20, b=40), legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="left", x=0), showlegend=True)
         st.plotly_chart(fig, use_container_width=True)
+
+    # --- Metric Comparison Block ---
+    st.markdown("---")
+    st.markdown("### 📊 Srovnání škol podle metriky")
+    
+    comparable_metrics = {
+        # Block 1: Hlavní výsledky
+        "Celkový zájem (přihlášky)": "total_apps",
+        "Index převisu": "comp_idx",
+        "Index reálné poptávky": "pure_demand_idx",
+        "Celková úspěšnost (%)": "success_rate",
+        
+        # Block 2: Bodová úroveň
+        "Bodový průměr přijatých": "avg_admitted",
+        "Body posledního přijatého": "min_score",
+        "Průměr horních 10 %": "elite_avg",
+        "Průměr spodních 25 %": "bottom_25_avg",
+        "Bodový rozdíl (Gap)": "talent_gap",
+        
+        # Block 3: Strategické ukazatele
+        "Poptávka skalních zájemců (%)": "interest_p1_pct",
+        "Podíl skalních žáků (%)": "intake_p1_pct",
+        "Podíl náhradních voleb (P3+) (%)": "intake_p3p_pct",
+        "Intenzita odlivu (%)": "release_rate",
+        
+        # Block 5: Kapacitní analýza
+        "Plánovaná kapacita": "planned_capacity",
+        "Míra naplněnosti (%)": "fullness_rate",
+        "Volná místa": "vacant_seats",
+        "Vzdali se přijetí": "gave_up_count",
+        "Úspěšnost 1. priority (%)": "p1_loyalty"
+    }
+    
+    selected_metric_label = st.selectbox("Vyberte metriku pro srovnání", options=list(comparable_metrics.keys()))
+    
+    # --- Metric Explanation (NEW) ---
+    from src.ui_components import METRIC_HELP
+    if selected_metric_label in METRIC_HELP:
+        help_data = METRIC_HELP[selected_metric_label]
+        st.info(f"💡 **{help_data['title']}**\n\n{help_data['desc']}", icon="❔")
+    
+    selected_metric_key = comparable_metrics[selected_metric_label]
+    
+    # Calculate metrics for all selected groups
+    metric_data = []
+    overlay_data = []
+    for (school, field), group in display_df.groupby(['SchoolName', 'FieldLabel']):
+        # Get capacity for this specific school/field combination
+        riz = str(group['RED_IZO'].iloc[0])
+        kkov = str(group['KKOV'].iloc[0])
+        field_cap = get_planned_capacity(riz, kkov, capacity_dfs, selected_rounds)
+        
+        kpis = calculate_kpis(group, planned_capacity=field_cap)
+        val = kpis.get(selected_metric_key)
+        if val is not None:
+            # Scale metrics if labels have (%) and it's not already handled in analysis
+            if "(%)" in selected_metric_label and selected_metric_key not in ["comp_idx", "pure_demand_idx"]:
+                # Note: Most values are already 0-100 from analysis.py, 
+                # but we keep this for consistency if needed.
+                pass
+                
+            label = f"{school} ({field})"
+            metric_data.append({"Škola/Obor": label, "Hodnota": round(val, 2), "Barva": color_map.get(label, "#333")})
+            
+            # Use specific overlays for specific metrics
+            if selected_metric_key == "bottom_25_avg" and kpis.get("avg_admitted"):
+                overlay_data.append({"Škola/Obor": label, "Reference": round(kpis["avg_admitted"], 2), "RefLabel": "Průměr třídy"})
+            elif selected_metric_key == "pure_demand_idx" and kpis.get("comp_idx"):
+                overlay_data.append({"Škola/Obor": label, "Reference": round(kpis["comp_idx"], 2), "RefLabel": "Index převisu"})
+    
+    if metric_data:
+        # 1. EXPLICIT SORTING in Python
+        df_metric = pd.DataFrame(metric_data).sort_values("Hodnota", ascending=True)
+        sorted_labels = df_metric["Škola/Obor"].tolist()
+        
+        # SPECIAL CASE: Overlay Charts (Bottom 25% or Real Demand Index)
+        use_overlay = selected_metric_key in ["bottom_25_avg", "pure_demand_idx"] and overlay_data
+        
+        if use_overlay:
+            import plotly.graph_objects as go
+            fig_metric = go.Figure()
+            
+            # Prepare overlay data map
+            ov_map = {d['Škola/Obor']: d['Reference'] for d in overlay_data}
+            ref_name = overlay_data[0]['RefLabel'] if overlay_data else "Reference"
+            data_name = selected_metric_label
+            
+            # Background bars: Reference (Transparent with border)
+            fig_metric.add_trace(go.Bar(
+                x=[ov_map.get(lbl, 0) for lbl in sorted_labels],
+                y=sorted_labels,
+                orientation='h',
+                name=ref_name,
+                marker=dict(
+                    color='rgba(150,150,150,0.05)', # Ultra-subtle background
+                    line=dict(color='rgba(100,100,100,0.7)', width=1.5) # Sharper border
+                ),
+                hovertemplate=f"{ref_name}: %{{x:.2f}}<extra></extra>"
+            ))
+            
+            # Foreground bars: Data (Colored)
+            fig_metric.add_trace(go.Bar(
+                x=df_metric["Hodnota"],
+                y=sorted_labels,
+                orientation='h',
+                name=data_name,
+                marker=dict(color=[color_map.get(lbl, "#333") for lbl in sorted_labels]),
+                text=df_metric["Hodnota"],
+                textposition='inside',
+                insidetextanchor='end',
+                hovertemplate=f"{data_name}: %{{x:.2f}}<extra></extra>"
+            ))
+            
+            # Add Annotations (Delta and Reference Value)
+            for lbl in sorted_labels:
+                val_data = df_metric[df_metric["Škola/Obor"] == lbl]["Hodnota"].iloc[0]
+                val_ref = ov_map.get(lbl)
+                if val_ref:
+                    delta = val_data - val_ref
+                    # 1. Reference Value at the end of transparent bar
+                    fig_metric.add_annotation(
+                        x=val_ref, y=lbl,
+                        text=f" {val_ref:.2f}",
+                        showarrow=False,
+                        xanchor='left',
+                        font=dict(size=11, color="#666")
+                    )
+                    # 2. Delta (Δ) in the gap between bars
+                    # Position it at midpoint if possible
+                    gap_mid = (val_data + val_ref) / 2
+                    if abs(val_data - val_ref) > (val_ref * 0.05): # Only show if gap is significant
+                        fig_metric.add_annotation(
+                            x=gap_mid, y=lbl,
+                            text=f"Δ {delta:+.1f}",
+                            showarrow=False,
+                            font=dict(size=10, color="gray", style="italic")
+                        )
+            
+            chart_height = 80 + len(sorted_labels) * 35
+            fig_metric.update_layout(
+                barmode='overlay',
+                height=chart_height,
+                showlegend=False
+            )
+        else:
+            # Standard Plotly Express Bar
+            chart_height = 80 + len(sorted_labels) * 35
+            fig_metric = px.bar(df_metric, x="Hodnota", y="Škola/Obor", orientation='h',
+                                color="Škola/Obor", color_discrete_map=color_map,
+                                text="Hodnota", height=chart_height)
+            fig_metric.update_traces(textposition='auto')
+
+        fig_metric.update_layout(
+            yaxis={'categoryorder':'array', 'categoryarray': sorted_labels, 'title': None}, 
+            xaxis_title=selected_metric_label,
+            showlegend=False,
+            margin=dict(l=20, r=80, t=30, b=10) # Increased right margin for labels
+        )
+        st.plotly_chart(fig_metric, use_container_width=True)
+    else:
+        st.info(f"💡 Metrika **{selected_metric}** není pro vybrané školy relevantní. Pravděpodobně nenaplnily kapacitu, takže u nich nedošlo k omezení výběru a metrika 'hranice' u nich neexistuje.")
 
 # Shared Statistics Table
 if not display_df.empty:
@@ -713,105 +662,115 @@ if not display_df.empty:
         st.markdown("### 📋 Statistický přehled (srovnání)")
     else:
         st.markdown("#### 📋 Podrobné statistiky oboru")
+    
     groups = sorted(display_df.groupby(['SchoolName', 'FieldLabel']), key=lambda x: x[0])
-    colors = px.colors.qualitative.Plotly
     color_map = {}
-    stats_base = []
+    stats_data = []
+
+    def format_stat(subset):
+        if subset.empty: return "-"
+        exempt = subset[subset['IsExempt']]
+        regular = subset[~subset['IsExempt']]
+        cnt_reg = len(regular)
+        cnt_exc = len(exempt)
+        avg_reg = round(regular['TotalPoints'].mean(), 1) if cnt_reg > 0 else 0
+        
+        total_cnt = cnt_reg + cnt_exc
+        base = f"{total_cnt}"
+        if cnt_exc > 0:
+            base += f" ({cnt_exc} ciz.)"
+        base += f" / {avg_reg:.1f}"
+        return base
 
     for i, ((school, field), group) in enumerate(groups):
-        color = colors[i % len(colors)]
-        color_map[(school, field)] = color
-        dist_all_cnt = []; dist_all_pct = []
-        dist_adm_cnt = []; dist_adm_pct = []
-        total_group = len(group); total_adm = len(group[group['Prijat'] == 1])
-        for prio in range(1, 6):
-            cnt_all = len(group[group['Priority'] == prio])
-            pct_all = (cnt_all / total_group * 100) if total_group > 0 else 0
-            dist_all_cnt.append(str(cnt_all))
-            dist_all_pct.append(f"({round(pct_all)}%)")
-            
-            cnt_adm = len(group[(group['Prijat'] == 1) & (group['Priority'] == prio)])
-            pct_adm = (cnt_adm / total_adm * 100) if total_adm > 0 else 0
-            dist_adm_cnt.append(str(cnt_adm))
-            dist_adm_pct.append(f"({round(pct_adm)}%)")
-            
-        priority_dist_all_str = " | ".join(dist_all_cnt) + "\n" + " ".join(dist_all_pct)
-        priority_dist_admitted_str = " | ".join(dist_adm_cnt) + "\n" + " ".join(dist_adm_pct)
+        color_map[(school, field)] = px.colors.qualitative.Plotly[i % len(px.colors.qualitative.Plotly)]
         
-        # Calculate Elite Average (Top 10% of applicants in the field)
-        top_10_count = max(1, round(len(group) * 0.1))
-        elite_avg = round(group.sort_values('TotalPoints', ascending=False).head(top_10_count)['TotalPoints'].mean(), 1)
+        # 3. Kapacita
+        riz_val = str(group['RED_IZO'].iloc[0])
+        kkov_val = str(group['KKOV'].iloc[0])
+        planned_cap = get_planned_capacity(riz_val, kkov_val, capacity_dfs, selected_rounds)
         
-        group['ReasonClean'] = group['Reason'].replace(['nan', 'None', '', 'nan'], 'Neuvedeno')
-        group.loc[group['Prijat'] == 1, 'ReasonClean'] = 'PŘIJAT'
-        reason_groups = group.groupby('ReasonClean')
-        admitted_regular = group[(group['Prijat'] == 1) & (~group['IsExempt'])]
-        min_score_val = round(admitted_regular['TotalPoints'].min(), 1) if not admitted_regular.empty else None
+        # 4. Počet přihlášek
+        total_apps = len(group)
+        
+        # 5. Priorita přihl. (10+12+1+0+0)
+        prio_counts = [len(group[group['Priority'] == p]) for p in range(1, 6)]
+        prio_dist_str = "+".join(map(str, prio_counts))
+        
+        # 6. Přijato
+        admitted = group[group['Prijat'] == 1]
+        admitted_stat = format_stat(admitted)
+        
+        # 7. Min. bodů (only regular admitted)
+        adm_reg = admitted[~admitted['IsExempt']]
+        min_score = f"{adm_reg['TotalPoints'].min():.1f}" if not adm_reg.empty else "-"
+        
+        # 8. Priorita přij.
+        prio_adm_counts = [len(admitted[admitted['Priority'] == p]) for p in range(1, 6)]
+        prio_adm_str = "+".join(map(str, prio_adm_counts))
+        
+        # 9. Vzdali se (NEW)
+        gave_up = group[group.get('GaveUpSpot', False) == True]
+        gave_up_stat = format_stat(gave_up)
 
-        for reason, r_group in reason_groups:
-            exempt = r_group[r_group['IsExempt']]; regular = r_group[~r_group['IsExempt']]
-            cnt_regular = len(regular); cnt_exempt = len(exempt)
-            avg_points_reg = round(regular['TotalPoints'].mean(), 1) if cnt_regular > 0 else 0
-            stats_base.append({
-                "SchoolName": school, "KKOV": field, "TotalCount": len(group),
-                "PriorityDistAll": priority_dist_all_str, "PriorityDistAdm": priority_dist_admitted_str,
-                "EliteAvg": f"{elite_avg:.1f}" if elite_avg else "-",
-                "MinScore": f"{min_score_val:.1f}" if min_score_val else "-", 
-                "Reason": reason, "Počet": cnt_regular,
-                "Průměr": f"{avg_points_reg:.1f}", "Cizinci": cnt_exempt
-            })
+        # 10. Vyšší priorita (vzdal se nebo přijat výše)
+        higher_prio = group[group['Reason'].str.contains('vzdal|vyssi_prioritu', case=False, na=False)]
+        higher_prio_stat = format_stat(higher_prio)
+        
+        # 11. Kapacit. důvod
+        cap_reject = group[group['Reason'].str.contains('kapacit', case=False, na=False)]
+        cap_stat = format_stat(cap_reject)
+        
+        # 12. Nesplnili
+        failed = group[group['Reason'].str.contains('nespln|neprosp|nesplnil|nedosah|kriteri', case=False, na=False)]
+        failed_stat = format_stat(failed)
+        
+        stats_data.append({
+            "Škola": school,
+            "Obor": field,
+            "Kapacita": planned_cap if planned_cap else "-",
+            "Přihlášky": total_apps,
+            "Priorita přihl.": prio_dist_str,
+            "Přijato": admitted_stat,
+            "Min. bodů": min_score,
+            "Priorita přij.": prio_adm_str,
+            "Vzdali se": gave_up_stat,
+            "Vyšší priorita": higher_prio_stat,
+            "Kapacit. důvod": cap_stat,
+            "Nesplnili": failed_stat
+        })
 
-    if stats_base:
-        df_base = pd.DataFrame(stats_base)
-        df_base['DisplayVal'] = df_base.apply(lambda row: f"{int(row['Počet'])} / {row['Průměr']}" + (f" (+{int(row['Cizinci'])} ciz)" if row['Cizinci'] > 0 else ""), axis=1)
-        df_base['ReasonShort'] = df_base['Reason'].map(get_reason_label)
-        pivot = df_base.pivot(index=['SchoolName', 'KKOV', 'TotalCount', 'PriorityDistAll', 'PriorityDistAdm', 'EliteAvg', 'MinScore'], columns='ReasonShort', values='DisplayVal').reset_index()
-        pivot.rename(columns={
-            'SchoolName': 'Škola', 'KKOV': 'Obor', 'TotalCount': 'Přihlášek', 
-            'PriorityDistAll': 'Priority\n(všichni)', 'MinScore': 'Poslední\npřijatý', 
-            'PriorityDistAdm': 'Priority\n(přijatí)', 'EliteAvg': 'Elitní\nprůměr'
-        }, inplace=True)
+    if stats_data:
+        df_stats = pd.DataFrame(stats_data)
         
-        current_cols = pivot.columns.tolist()
-        final_cols = ['Škola', 'Obor', 'Přihlášek', 'Priority\n(všichni)', 'Poslední\npřijatý', 'Elitní\nprůměr']
-        if 'PŘIJAT' in current_cols:
-            final_cols.append('PŘIJAT')
-            if 'Priority\n(přijatí)' in current_cols: final_cols.append('Priority\n(přijatí)')
-        for c in current_cols:
-            if c not in final_cols: final_cols.append(c)
-        pivot = pivot[final_cols].fillna("-")
-        
-        # Action Buttons for Detail Mode
+        # Action Buttons
         if view_mode == "Detailní rozbor školy":
             c1, c2 = st.columns(2)
             with c1:
-                csv = pivot.to_csv(index=False).encode('utf-8-sig')
+                csv = df_stats.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(label="📥 Stáhnout jako CSV", data=csv, file_name=f'stats_{school_name.replace(" ", "_")}.csv', mime='text/csv', use_container_width=True)
             with c2:
-                kpi_data = {
-                    'total_apps': total_apps, 
-                    'success_rate': success_rate, 
-                    'comp_idx': competition_index,
-                    'cap_reject_rate': cap_reject_rate,
-                    'p1_loyalty': p1_loyalty,
-                    'talent_gap': talent_gap
-                }
-                pdf_bytes = create_pdf_report(school_name, selected_year, selected_rounds, pivot, kpi_data)
+                kpi_data = calculate_kpis(school_data)
+                pdf_bytes = create_pdf_report(school_name, selected_year, selected_rounds, df_stats, kpi_data)
                 st.download_button(label="📄 Stáhnout PDF Report", data=pdf_bytes, file_name=f'report_{school_name.replace(" ", "_")}.pdf', mime='application/pdf', use_container_width=True)
 
-        # Style columns for wrapping and alignment
         col_cfg = {
-            "Priority\n(všichni)": st.column_config.TextColumn("Priority\n(všichni)", width="small"),
-            "Priority\n(přijatí)": st.column_config.TextColumn("Priority\n(přijatí)", width="small"),
-            "Škola": st.column_config.TextColumn("Škola", width="medium"),
-            "Obor": st.column_config.TextColumn("Obor", width="medium"),
-            "Poslední\npřijatý": st.column_config.TextColumn("Min. body", width="small"),
-            "Elitní\nprůměr": st.column_config.TextColumn("Elita", width="small"),
-            "Přihlášek": st.column_config.NumberColumn("Přihlášek", width="small"),
+            "Škola": st.column_config.TextColumn("Škola", width=180),
+            "Obor": st.column_config.TextColumn("Obor", width=160),
+            "Kapacita": st.column_config.TextColumn("Kapacita", width=70),
+            "Přihlášky": st.column_config.NumberColumn("Přihl.", width=60),
+            "Priorita přihl.": st.column_config.TextColumn("Priorita přihl.", width=100),
+            "Přijato": st.column_config.TextColumn("Přijato", width=110),
+            "Min. bodů": st.column_config.TextColumn("Min. bodů", width=70),
+            "Priorita přij.": st.column_config.TextColumn("Priorita přij.", width=100),
+            "Vzdali se": st.column_config.TextColumn("Vzdali se", width=110),
+            "Vyšší priorita": st.column_config.TextColumn("Vyšší priorita", width=110),
+            "Kapacit. důvod": st.column_config.TextColumn("Kapacit. důvod", width=110),
+            "Nesplnili": st.column_config.TextColumn("Nesplnili", width=110),
         }
         
         selected_row = st.dataframe(
-            pivot.style.apply(lambda row: [f'color: {color_map.get((row["Škola"], row["Obor"]), "#000000")}; font-weight: bold;' for _ in row.index], axis=1), 
+            df_stats.style.apply(lambda row: [f'color: {color_map.get((row["Škola"], row["Obor"]), "#000000")}; font-weight: bold;' for _ in row.index], axis=1), 
             use_container_width=True, 
             hide_index=True,
             column_config=col_cfg,
@@ -819,11 +778,9 @@ if not display_df.empty:
             selection_mode="single-row"
         )
         
-        # Automatic navigation to detail mode
         if view_mode == "Srovnání škol" and selected_row and hasattr(selected_row, "selection") and selected_row.selection.rows:
             idx = selected_row.selection.rows[0]
-            school_to_detail = pivot.iloc[idx]['Škola']
-            # Save current selections before navigating away
+            school_to_detail = df_stats.iloc[idx]['Škola']
             st.session_state['saved_schools_selection'] = st.session_state.get('schools_select_v2', [])
             st.session_state['saved_fields_selection'] = st.session_state.get('fields_select_v2', [])
             st.session_state['pending_nav_school'] = school_to_detail

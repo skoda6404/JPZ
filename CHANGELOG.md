@@ -2,6 +2,39 @@
 
 Všechny významné změny v projektu JPZ budou zaznamenány v tomto souboru.
 
+## [3.0.0] - 2026-02-14
+
+### Přidáno
+
+- **Prémiové overlay grafy**: U metrik *Průměr spodních 25 %* a *Index reálné poptávky* se nyní zobrazuje referenční průhledný sloupec (celkový průměr / celkový převis) s přesně umístěným popiskem Δ Delta v mezeře.
+- **Index reálné poptávky**: Nový vzorec `(Přijatí + Odmítnutí z kapacity) / Kapacita`. Eliminuje zkreslení u prázdných škol.
+- **Strategické KPI**: Nové metriky: *Poptávka skalních zájemců (%)*, *Podíl skalních žáků (%)*, *Intenzita odlivu (%)*, *Podíl náhradních voleb (P3+) (%)*.
+- **Varování u nenaplněných škol**: Automatické banery a vizuální upozornění (`⚠️`) u škol s volnou kapacitou.
+- **Inteligentní 100% úspěšnost**: Automatická detekce „nenaplněné" školy s hvězdičkou a vysvětlením.
+- **Filtr oborů v detailu školy**: Multiselect pro analýzu jednotlivých oborů (KKOV).
+- **Uložení/načtení výběru**: Export a import seznamu škol jako JSON.
+- **Absolutní počty v grafech priorit**: Popisky nyní zobrazují procenta i absolutní čísla (např. *42 % (150 přihlášek)*).
+- **Komplexní nápověda**: Každá KPI metrika obsahuje interaktivní nápovědu pro uchazeče i ředitele.
+- **Architektonická dokumentace**: Nový soubor `ARCHITECTURE.md` s popisem datového toku a modulů.
+
+### Změněno
+
+- **Sjednocení výšek grafů**: Všechny srovnávací grafy mají konzistentní kompaktní výšku (35 px na řádek).
+- **Formát indexů**: *Index převisu* a *Index reálné poptávky* jsou zobrazeny jako desetinná čísla (1.50) místo procent.
+- **Odstranění redundantních legend**: Legendy škol ve srovnávacích grafech byly odebrány (školy jsou identifikovány na ose Y).
+- **Centralizace výpočtů**: Veškerá KPI logika je nyní v `src/analysis.py`.
+- **Přejmenování metrik**: Intuitivnější české názvy strategických ukazatelů.
+- **Zjednodušení výpočtu volných míst**: `Kapacita − Přijatí` (bez dalších úprav).
+
+### Opraveno
+
+- **ValueError (Plotly)**: Odstraněna nekompatibilní vlastnost `dash` u bar markerů.
+- **NameError (app.py)**: Opravena reference na neexistující proměnnou `selected_metric`.
+- **Načítání výběru škol**: Vyřešena chyba StreamlitAPIException při načítání JSON výběrů.
+- **Nápověda „Průměr horních 10 %"**: Opraveno z „uchazečů" na „přijatých".
+
+---
+
 ## [2.0.0] - 2026-02-11
 
 ### Přidáno
@@ -35,32 +68,37 @@ Všechny významné změny v projektu JPZ budou zaznamenány v tomto souboru.
 - **Prázdné grafy přelivu**: Opraveno mapování studentů pomocí Student_UUID.
 - **Překrývání textu**: Opraveno renderování grafů s malým počtem položek.
 
+---
+
 ## [1.2.0] - 2026-02-02
 
 ### Přidáno
 
-- **Mapování KKOV**: Aplikace nyní automaticky zobrazuje názvy oborů (např. "Gymnázium (8leté)") místo pouhých kódů.
+- **Mapování KKOV**: Automatické zobrazení názvů oborů (např. "Gymnázium (8leté)") místo kódů.
 - **Skript pro extrakci**: Přidán skript `extract_kkov.py` pro zpracování PDF seznamu oborů.
-- **Plné názvy škol**: Filtr škol nyní zobrazuje úplný název školy dle rejstříku (podle souboru `skoly.csv`).
+- **Plné názvy škol**: Filtr zobrazuje úplný název školy dle rejstříku.
 
 ### Změněno
 
-- **Filtrování**: Vylepšená navigace výběrem škol a oborů s čitelnými názvy.
+- **Filtrování**: Vylepšená navigace s čitelnými názvy oborů a škol.
+
+---
 
 ## [1.1.0] - 2026-01-21
 
 ### Přidáno
 
-- **Sloupec "Celkem přihlášek"**: Do tabulky statistik přidán celkový počet uchazečů.
-- **Sloupec "Poslední přijatý"**: Zobrazení minimálního bodového zisku přijatého uchazeče (bez zahrnutí cizinců s úlevou).
-- **Kompaktní zobrazení**: Sloučení počtu a průměru do jedné buňky (např. "60 / 58.3").
-- **Lokalizace**: České popisky ve filtrovacích polích ("Vyberte...").
+- **Sloupec „Celkem přihlášek"**: Celkový počet uchazečů v tabulce statistik.
+- **Sloupec „Poslední přijatý"**: Minimální bodový zisk přijatého uchazeče.
+- **Kompaktní zobrazení**: Sloučení počtu a průměru do jedné buňky.
+- **Lokalizace**: České popisky ve filtrovacích polích.
 
 ### Změněno
 
-- **Přejmenování**: Aplikace přejmenována na "JPZ".
-- **Design**: Vylepšené formátování tabulky statistik (barevné písmo podle školy).
-- **Opravy**: Návrat omylem smazaného kódu pro načítání dat.
+- **Přejmenování** aplikace na „JPZ".
+- **Design**: Vylepšené formátování tabulky statistik.
+
+---
 
 ## [1.0.0] - 2026-01-21
 
