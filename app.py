@@ -162,6 +162,18 @@ if not long_df.empty:
         if 'selected_schools' not in st.session_state: st.session_state.selected_schools = []
         st.session_state.selected_schools = [s for s in st.session_state.selected_schools if s in available_schools]
         
+        # Apply pending upload BEFORE widgets render (safe timing)
+        if '_pending_upload_schools' in st.session_state:
+            st.session_state['schools_select_v2'] = st.session_state.pop('_pending_upload_schools')
+        if '_pending_upload_fields' in st.session_state:
+            # Validate fields against the schools that will be selected
+            pending_schools = st.session_state.get('schools_select_v2', [])
+            if pending_schools:
+                valid_field_options = sorted(long_df[long_df['SchoolName'].isin(pending_schools)]['FieldLabel'].unique().tolist())
+                validated_fields = [f for f in st.session_state['_pending_upload_fields'] if f in valid_field_options]
+                st.session_state['fields_select_v2'] = validated_fields
+            del st.session_state['_pending_upload_fields']
+        
         selected_schools = st.sidebar.multiselect("Vyberte školy", options=available_schools, key='schools_select_v2', placeholder="Zvolte...")
         st.session_state.selected_schools = selected_schools
         
@@ -180,11 +192,10 @@ if not long_df.empty:
                     new_schools = [s.strip() for s in fav_data.get('schools', [])]
                     new_fields = [f.strip() for f in fav_data.get('fields', [])]
                     
-                    # Filter only those that exist in current dataset
+                    # Store as pending — applied safely before widgets on next rerun
                     valid_schools = [s for s in new_schools if s in available_schools]
-                    
-                    st.session_state['schools_select_v2'] = valid_schools
-                    st.session_state['fields_select_v2'] = new_fields
+                    st.session_state['_pending_upload_schools'] = valid_schools
+                    st.session_state['_pending_upload_fields'] = new_fields
                 except Exception as e:
                     st.session_state['upload_error'] = f"Chyba při nahrávání: {e}"
 
