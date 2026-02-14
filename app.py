@@ -31,6 +31,10 @@ if st.session_state.get('pending_back_nav'):
     st.session_state.view_mode = "Srovnání škol"
     del st.session_state['pending_back_nav']
     st.session_state['navigated_from_comparison'] = False
+    # Clean up detail-mode widget keys to prevent orphaned state conflicts
+    for key in ['detail_fields_select', 'single_school_select']:
+        if key in st.session_state:
+            del st.session_state[key]
     if 'saved_schools_selection' in st.session_state:
         st.session_state['_pending_upload_schools'] = st.session_state['saved_schools_selection']
     if 'saved_fields_selection' in st.session_state:
